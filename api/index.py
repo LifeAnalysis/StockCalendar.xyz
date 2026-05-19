@@ -1839,7 +1839,8 @@ AImeme autonomous workflow:
 - If the user asks about subagents, skills, orchestration, coordination, or whether the workflow is wired, call aimeme_subagent_manifest.
 - For "find a meme", "what should I buy", "run discovery", or similar requests, call aimeme_autonomous_memecoin_scan first.
 - If the user does not specify a chain, scan all supported trending pools. Do not default memecoin discovery to Base.
-- For "how are my memes doing", "track prices", "should I hold/sell/trim", or position monitoring, call aimeme_market_monitor.
+- For "portfolio", "my positions", "watchlist", "what should I buy/sell", "how are my memes doing", "track prices", or position monitoring, call aimeme_portfolio_view. Use aimeme_market_monitor only when the user gives a specific token list.
+- Keep watch, buy-review, trim, and sell decisions inside the portfolio/watchlist framing. Wallet holdings will come from the wallet source once configured; until then, use AIMEME_TRACKED_TOKENS plus live discovery candidates.
 - For scheduled behavior, call aimeme_cron_status. GitHub Actions calls /api/cron/aimeme every 15 minutes; Vercel native crons are disabled so all schedules live in workflows.
 - The workflow can autonomously discover, prefilter, safety-check, rank, and prepare a buy plan. It cannot autonomously sign or send a swap until a wallet/signature flow is connected.
 - Use GeckoTerminal/CoinGecko trending for primary discovery, DexScreener for executable tape/liquidity, Rugcheck for Solana safety, and GoPlus for EVM safety.
@@ -1890,6 +1891,13 @@ def health() -> Dict[str, Any]:
             "subagent_coordinator": True,
             "subagents": sorted(AIMEME_SUBAGENTS.keys()),
             "cron": aimeme_cron_status(),
+            "portfolio": {
+                "endpoint": "/api/portfolio",
+                "wallet_env": "AIMEME_PORTFOLIO_WALLET",
+                "tracked_tokens_env": "AIMEME_TRACKED_TOKENS",
+                "wallet_configured": bool(_env("AIMEME_PORTFOLIO_WALLET") or _env("AIMEME_WALLET_ADDRESS")),
+                "tracked_tokens_configured": bool(_aimeme_tracked_tokens_from_env()),
+            },
             "live_tools": {
                 "geckoterminal": True,
                 "coingecko_key_configured": bool(_env("COINGECKO_API_KEY")),
