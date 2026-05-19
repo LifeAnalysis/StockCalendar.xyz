@@ -1,11 +1,5 @@
 {
   "version": 2,
-  "crons": [
-    {
-      "path": "/api/cron/aimeme",
-      "schedule": "0 0 * * *"
-    }
-  ],
   "routes": [
     {
       "src": "/api/(.*)",
