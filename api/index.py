@@ -586,7 +586,7 @@ def chat_response(payload: Dict[str, Any]) -> Dict[str, Any]:
             except TypeError as exc:
                 result = {"ok": False, "error": str(exc), "args": args}
             tool_trace.append({"name": name, "args": {k: v for k, v in args.items() if "key" not in k.lower()}, "result": result})
-            if isinstance(result, dict) and result.get("needs_configuration") == "NUVOLARI_API_BASE_URL":
+            if isinstance(result, dict) and result.get("needs_configuration"):
                 return {
                     "reply": _configuration_reply(result),
                     "tool_trace": tool_trace,
