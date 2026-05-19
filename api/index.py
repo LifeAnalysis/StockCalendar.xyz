@@ -455,6 +455,19 @@ def _aimeme_tracked_tokens_from_env() -> List[Dict[str, Any]]:
     return []
 
 
+def _portfolio_action_bucket(action: Any) -> str:
+    value = str(action or "").upper()
+    if value in {"EXIT", "EXIT_OR_AVOID", "TRIM_OR_EXIT"}:
+        return "sell"
+    if value in {"TAKE_PROFIT"}:
+        return "trim"
+    if value in {"HOLD_OR_ENTER_AFTER_SM", "CLEAN BUY", "TINY SPEC"}:
+        return "buy_watch"
+    if value in {"NO BUY", "NO DATA"}:
+        return "avoid"
+    return "watch"
+
+
 def _cron_authorized(headers: Any) -> bool:
     secret = _env("AIMEME_CRON_SECRET")
     if not secret:
@@ -951,6 +964,104 @@ def aimeme_market_monitor(tokens: List[Dict[str, Any]]) -> Dict[str, Any]:
     }
 
 
+def aimeme_portfolio_view(
+    wallet_address: str = "",
+    chain: str = "",
+    include_scan: bool = False,
+    max_candidates: int = 3,
+) -> Dict[str, Any]:
+    wallet = (wallet_address or _env("AIMEME_PORTFOLIO_WALLET") or _env("AIMEME_WALLET_ADDRESS")).strip()
+    tracked_tokens = _aimeme_tracked_tokens_from_env()
+    monitor = aimeme_market_monitor(tracked_tokens) if tracked_tokens else {
+        "ok": True,
+        "source": "AIMEME_TRACKED_TOKENS",
+        "count": 0,
+        "items": [],
+    }
+    positions = []
+    total_position_usd = 0.0
+    for item in (monitor.get("items") or [])[:50]:
+        decision = item.get("decision") or {}
+        market = item.get("market") or {}
+        position_raw = item.get("positionUsd")
+        try:
+            total_position_usd += float(position_raw or 0)
+        except (TypeError, ValueError):
+            pass
+        positions.append(
+            {
+                "symbol": item.get("symbol") or ((market.get("baseToken") or {}).get("symbol")),
+                "chain": item.get("chain") or market.get("chainId"),
+                "address": item.get("address"),
+                "positionUsd": position_raw,
+                "entryPrice": item.get("entryPrice"),
+                "priceUsd": decision.get("priceUsd") or market.get("priceUsd"),
+                "pnlPct": decision.get("pnlPct"),
+                "liquidityUsd": decision.get("liquidityUsd") or market.get("liquidityUsd"),
+                "action": decision.get("action"),
+                "bucket": _portfolio_action_bucket(decision.get("action")),
+                "reason": decision.get("reason"),
+                "pairUrl": market.get("url"),
+            }
+        )
+    watchlist = []
+    discovery = None
+    if include_scan:
+        scan = aimeme_autonomous_memecoin_scan(chain=chain, max_candidates=max_candidates, include_paid_templates=True)
+        discovery = scan.get("discovery")
+        for item in (scan.get("candidates") or [])[: max(1, min(int(max_candidates or 3), 10))]:
+            pool = item.get("pool") or {}
+            best_pair = item.get("best_pair") or {}
+            market_gate = item.get("market_gate") or {}
+            safety_gate = item.get("safety_gate") or {}
+            action = item.get("action") or "WATCH"
+            watchlist.append(
+                {
+                    "name": pool.get("name"),
+                    "network": item.get("network"),
+                    "tokenAddress": item.get("token_address"),
+                    "action": action,
+                    "bucket": _portfolio_action_bucket(action),
+                    "survivedFreeGates": item.get("survived_free_gates"),
+                    "priceUsd": best_pair.get("priceUsd"),
+                    "liquidityUsd": best_pair.get("liquidityUsd"),
+                    "marketReason": market_gate.get("reason"),
+                    "safetyReason": safety_gate.get("reason"),
+                    "needsPaidSmartMoney": bool(item.get("paid_smart_money_next_step")),
+                }
+            )
+    buckets = {"watch": 0, "buy_watch": 0, "trim": 0, "sell": 0, "avoid": 0}
+    for row in positions + watchlist:
+        bucket = row.get("bucket") or "watch"
+        buckets[bucket] = buckets.get(bucket, 0) + 1
+    return {
+        "ok": bool(monitor.get("ok")),
+        "source": "AImeme portfolio view",
+        "timestamp": int(time.time()),
+        "wallet": {
+            "address": wallet or None,
+            "configured": bool(wallet),
+            "source": "AIMEME_PORTFOLIO_WALLET/AIMEME_WALLET_ADDRESS or wallet_address input",
+            "fetch_enabled": False,
+            "status": "Wallet-backed holdings are wired as the next source; until a wallet is supplied, positions come from AIMEME_TRACKED_TOKENS.",
+        },
+        "holdings_source": "AIMEME_TRACKED_TOKENS",
+        "tracked_tokens_configured": bool(tracked_tokens),
+        "position_count": len(positions),
+        "watchlist_count": len(watchlist),
+        "total_position_usd": total_position_usd,
+        "buckets": buckets,
+        "positions": positions,
+        "watchlist": watchlist,
+        "discovery": discovery,
+        "execution_boundary": {
+            "can_prepare_quotes": True,
+            "can_sign_or_send": False,
+            "reason": "Hermes can prepare Nuvolari quote payloads, but wallet EOA, exact token addresses, integer amount, and user signatures are required before execution.",
+        },
+    }
+
+
 def aimeme_cron_cycle(max_candidates: int = 6, chain: str = "") -> Dict[str, Any]:
     scan = aimeme_autonomous_memecoin_scan(chain=chain, max_candidates=max_candidates, include_paid_templates=True)
     tracked_tokens = _aimeme_tracked_tokens_from_env()
@@ -1317,6 +1428,7 @@ TOOL_HANDLERS = {
     "aimeme_subagent_manifest": aimeme_subagent_manifest,
     "aimeme_dexscreener_token": aimeme_dexscreener_token,
     "aimeme_market_monitor": aimeme_market_monitor,
+    "aimeme_portfolio_view": aimeme_portfolio_view,
     "aimeme_cron_cycle": aimeme_cron_cycle,
     "aimeme_cron_status": aimeme_cron_status,
     "aimeme_rugcheck_token": aimeme_rugcheck_token,
@@ -1595,6 +1707,22 @@ TOOLS = [
                     },
                 },
                 "required": ["tokens"],
+            },
+        },
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "aimeme_portfolio_view",
+            "description": "Build the AImeme portfolio control view with tracked positions, watchlist candidates, watch/buy/trim/sell buckets, wallet status, and execution boundaries.",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "wallet_address": {"type": "string"},
+                    "chain": {"type": "string"},
+                    "include_scan": {"type": "boolean"},
+                    "max_candidates": {"type": "integer"},
+                },
             },
         },
     },
@@ -2063,6 +2191,25 @@ class handler(BaseHTTPRequestHandler):
             except (TypeError, ValueError):
                 max_candidates = 6
             self._send_json(200, aimeme_cron_cycle(max_candidates=max_candidates, chain=chain))
+            return
+        if path == "/api/portfolio":
+            qs = urllib.parse.parse_qs(parsed.query)
+            wallet = qs.get("wallet", [""])[0]
+            chain = qs.get("chain", [""])[0]
+            include_scan = qs.get("scan", ["0"])[0].lower() in {"1", "true", "yes"}
+            try:
+                max_candidates = int(qs.get("max_candidates", ["3"])[0])
+            except (TypeError, ValueError):
+                max_candidates = 3
+            self._send_json(
+                200,
+                aimeme_portfolio_view(
+                    wallet_address=wallet,
+                    chain=chain,
+                    include_scan=include_scan,
+                    max_candidates=max_candidates,
+                ),
+            )
             return
         self._send(200, frontend_html().encode("utf-8"), "text/html; charset=utf-8")
 
