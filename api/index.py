@@ -16,6 +16,8 @@ NUVOLARI_DOCS = {
     "yield": "https://docs.nuvolari.ai/execution-engine/yield.md",
     "liquidity": "https://docs.nuvolari.ai/execution-engine/add-liquidity.md",
     "shortcuts": "https://docs.nuvolari.ai/execution-engine/shortcuts.md",
+    "agents": "https://docs.nuvolari.ai/execution-engine/agents.md",
+    "insights": "https://docs.nuvolari.ai/ai-engine/insights.md",
 }
 
 
@@ -96,6 +98,21 @@ def _nuvolari_call(path: str, payload: Dict[str, Any], method: str = "POST") -> 
     )
 
 
+def _missing_path(env_name: str, action: str, payload: Dict[str, Any], docs_topic: str, method: str = "POST") -> Dict[str, Any]:
+    return {
+        "ok": False,
+        "needs_configuration": env_name,
+        "message": (
+            f"Nuvolari credentials and base URL are configured, but the exact REST path for {action} "
+            "is not published in the Context7/docs material. Configure this path in Vercel before "
+            "calling the live API."
+        ),
+        "intended_request": {"method": method.upper(), "path_env": env_name, "body": payload},
+        "docs_source": NUVOLARI_DOCS.get(docs_topic, NUVOLARI_DOCS["shortcuts"]),
+        "context7": CONTEXT7_NUVOLARI,
+    }
+
+
 def nuvolari_swap_quote(
     input_asset: str,
     output_asset: str,
@@ -105,17 +122,21 @@ def nuvolari_swap_quote(
     wallet_address: str = "",
     execute: bool = False,
 ) -> Dict[str, Any]:
+    payload = {
+        "input_asset": input_asset,
+        "output_asset": output_asset,
+        "amount": amount,
+        "input_chain": input_chain,
+        "output_chain": output_chain,
+        "wallet_address": wallet_address,
+        "execute": bool(execute),
+    }
+    path = _env("NUVOLARI_SWAP_PATH")
+    if not path:
+        return _missing_path("NUVOLARI_SWAP_PATH", "swap quotes/execution", payload, "swap")
     return _nuvolari_call(
-        _env("NUVOLARI_SWAP_PATH") or "/swap",
-        {
-            "input_asset": input_asset,
-            "output_asset": output_asset,
-            "amount": amount,
-            "input_chain": input_chain,
-            "output_chain": output_chain,
-            "wallet_address": wallet_address,
-            "execute": bool(execute),
-        },
+        path,
+        payload,
     )
 
 
@@ -127,16 +148,20 @@ def nuvolari_buy_asset(
     wallet_address: str = "",
     execute: bool = False,
 ) -> Dict[str, Any]:
+    payload = {
+        "asset": asset,
+        "amount": amount,
+        "pay_with_asset": pay_with_asset,
+        "chain": chain,
+        "wallet_address": wallet_address,
+        "execute": bool(execute),
+    }
+    path = _env("NUVOLARI_BUY_PATH")
+    if not path:
+        return _missing_path("NUVOLARI_BUY_PATH", "buy execution", payload, "swap")
     return _nuvolari_call(
-        _env("NUVOLARI_BUY_PATH") or "/buy",
-        {
-            "asset": asset,
-            "amount": amount,
-            "pay_with_asset": pay_with_asset,
-            "chain": chain,
-            "wallet_address": wallet_address,
-            "execute": bool(execute),
-        },
+        path,
+        payload,
     )
 
 
@@ -146,14 +171,18 @@ def nuvolari_yield_opportunities(
     min_apy: str = "",
     chain: str = "",
 ) -> Dict[str, Any]:
+    payload = {
+        "underlying_asset": underlying_asset,
+        "risk_profile": risk_profile,
+        "min_apy": min_apy,
+        "chain": chain,
+    }
+    path = _env("NUVOLARI_YIELD_PATH")
+    if not path:
+        return _missing_path("NUVOLARI_YIELD_PATH", "yield opportunity discovery", payload, "yield")
     return _nuvolari_call(
-        _env("NUVOLARI_YIELD_PATH") or "/yield/opportunities",
-        {
-            "underlying_asset": underlying_asset,
-            "risk_profile": risk_profile,
-            "min_apy": min_apy,
-            "chain": chain,
-        },
+        path,
+        payload,
     )
 
 
@@ -164,15 +193,19 @@ def nuvolari_enter_yield(
     wallet_address: str = "",
     execute: bool = False,
 ) -> Dict[str, Any]:
+    payload = {
+        "strategy_id": strategy_id,
+        "input_asset": input_asset,
+        "amount": amount,
+        "wallet_address": wallet_address,
+        "execute": bool(execute),
+    }
+    path = _env("NUVOLARI_ENTER_YIELD_PATH")
+    if not path:
+        return _missing_path("NUVOLARI_ENTER_YIELD_PATH", "yield strategy entry", payload, "yield")
     return _nuvolari_call(
-        _env("NUVOLARI_ENTER_YIELD_PATH") or "/yield/enter",
-        {
-            "strategy_id": strategy_id,
-            "input_asset": input_asset,
-            "amount": amount,
-            "wallet_address": wallet_address,
-            "execute": bool(execute),
-        },
+        path,
+        payload,
     )
 
 
@@ -187,19 +220,23 @@ def nuvolari_add_liquidity(
     wallet_address: str = "",
     execute: bool = False,
 ) -> Dict[str, Any]:
+    payload = {
+        "asset_a": asset_a,
+        "asset_b": asset_b,
+        "amount_a": amount_a,
+        "amount_b": amount_b,
+        "chain": chain,
+        "fee_tier": fee_tier,
+        "price_range": price_range,
+        "wallet_address": wallet_address,
+        "execute": bool(execute),
+    }
+    path = _env("NUVOLARI_ADD_LIQUIDITY_PATH")
+    if not path:
+        return _missing_path("NUVOLARI_ADD_LIQUIDITY_PATH", "add liquidity execution", payload, "liquidity")
     return _nuvolari_call(
-        _env("NUVOLARI_ADD_LIQUIDITY_PATH") or "/liquidity/add",
-        {
-            "asset_a": asset_a,
-            "asset_b": asset_b,
-            "amount_a": amount_a,
-            "amount_b": amount_b,
-            "chain": chain,
-            "fee_tier": fee_tier,
-            "price_range": price_range,
-            "wallet_address": wallet_address,
-            "execute": bool(execute),
-        },
+        path,
+        payload,
     )
 
 
@@ -405,7 +442,8 @@ TOOLS = [
 SYSTEM_PROMPT = """You are Gary's Hermes Nuvolari execution agent.
 Use the Nuvolari tools whenever the user asks about swaps, buys, yield, LPs, routes, positions, or execution.
 Never invent filled trades. If execute is false or the Nuvolari API base URL is missing, explain what is ready and what config is missing.
-If a tool returns needs_configuration, stop calling more tools and answer with the missing variable and intended request.
+Context7 currently publishes Nuvolari product/documentation flows, not REST endpoint paths. Do not invent API paths.
+If a live execution tool returns needs_configuration for a path env var, stop calling more tools and explain which env var must be set.
 Before real execution, require an explicit user confirmation that includes asset, amount, chain, and wallet.
 Use nuvolari_context7_query or docs_query when the exact Nuvolari behavior is unclear."""
 
@@ -417,6 +455,13 @@ def health() -> Dict[str, Any]:
         "openrouter_configured": bool(_env("OPENROUTER_API_KEY")),
         "nuvolari_credentials_configured": bool(_env("NUVOLARI_API_KEY") and _env("NUVOLARI_SECRET_API_KEY")),
         "nuvolari_base_url_configured": bool(_env("NUVOLARI_API_BASE_URL")),
+        "nuvolari_paths_configured": {
+            "swap": bool(_env("NUVOLARI_SWAP_PATH")),
+            "buy": bool(_env("NUVOLARI_BUY_PATH")),
+            "yield": bool(_env("NUVOLARI_YIELD_PATH")),
+            "enter_yield": bool(_env("NUVOLARI_ENTER_YIELD_PATH")),
+            "add_liquidity": bool(_env("NUVOLARI_ADD_LIQUIDITY_PATH")),
+        },
         "context7_nuvolari": CONTEXT7_NUVOLARI,
     }
 
@@ -455,21 +500,26 @@ def _coerce_tool_args(raw: str) -> Dict[str, Any]:
 
 def _configuration_reply(result: Dict[str, Any]) -> str:
     intended = result.get("intended_request") if isinstance(result.get("intended_request"), dict) else {}
+    missing = result.get("needs_configuration", "NUVOLARI_API_BASE_URL")
+    docs_source = result.get("docs_source")
     method = intended.get("method", "POST")
-    path = intended.get("path", "")
+    path = intended.get("path") or intended.get("path_env", "")
     body = intended.get("body", {})
-    lines = [
-        "I cannot call live Nuvolari execution yet because `NUVOLARI_API_BASE_URL` is not configured in Vercel.",
-        "",
-        "The Nuvolari keys are present, and the agent prepared this request:",
-        f"`{method} {path}`",
-    ]
+    if missing == "NUVOLARI_API_BASE_URL":
+        first = "I cannot call live Nuvolari execution yet because `NUVOLARI_API_BASE_URL` is not configured in Vercel."
+        request_line = f"`{method} {path}`"
+    else:
+        first = f"I did not call Nuvolari live because `{missing}` is not configured in Vercel."
+        request_line = f"`{method} <{missing}>`"
+    lines = [first, "", "The Nuvolari keys/base URL are present, and the agent prepared this request:", request_line]
     if body:
         lines.extend(["", "Payload:", json.dumps(body, indent=2)])
+    if docs_source:
+        lines.extend(["", "Context7/Nuvolari docs source:", docs_source])
     lines.extend(
         [
             "",
-            "Set `NUVOLARI_API_BASE_URL` to the Nuvolari execution API host, then this same request will call the live API instead of stopping here.",
+            f"Set `{missing}` to the exact Nuvolari REST path, then this same request will call the live API instead of stopping here.",
         ]
     )
     return "\n".join(lines)
@@ -663,10 +713,11 @@ FRONTEND_HTML = """<!doctype html>
     async function loadHealth() {
       const h = await (await fetch("/api/health")).json();
       subtitle.textContent = `Model: ${h.model} via OpenRouter`;
-      statusEl.innerHTML = `
+        statusEl.innerHTML = `
         <div class="pill ${h.openrouter_configured ? "ok" : "warn"}">OpenRouter ${h.openrouter_configured ? "configured" : "missing"}</div>
         <div class="pill ${h.nuvolari_credentials_configured ? "ok" : "warn"}">Nuvolari keys ${h.nuvolari_credentials_configured ? "configured" : "missing"}</div>
         <div class="pill ${h.nuvolari_base_url_configured ? "ok" : "warn"}">Nuvolari API URL ${h.nuvolari_base_url_configured ? "configured" : "needed"}</div>
+        <div class="pill ${h.nuvolari_paths_configured && h.nuvolari_paths_configured.yield ? "ok" : "warn"}">Nuvolari REST paths ${h.nuvolari_paths_configured && h.nuvolari_paths_configured.yield ? "configured" : "need exact docs"}</div>
         <div class="pill ok">Context7 Nuvolari connected</div>`;
     }
     async function send(message) {
