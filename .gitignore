@@ -68,6 +68,7 @@ mini-swe-agent/
 .direnv/
 .nix-stamps/
 result
+build/
 website/static/api/skills-index.json
 models-dev-upstream/
 hermes_cli/tui_dist/*
