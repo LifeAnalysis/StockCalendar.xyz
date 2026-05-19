@@ -5,7 +5,6 @@ import urllib.error
 import urllib.parse
 import urllib.request
 from http.server import BaseHTTPRequestHandler
-from pathlib import Path
 from typing import Any, Dict, List, Optional
 
 
@@ -439,6 +438,7 @@ def _openrouter_chat(messages: List[Dict[str, Any]]) -> Dict[str, Any]:
             "messages": messages,
             "tools": TOOLS,
             "tool_choice": "auto",
+            "parallel_tool_calls": False,
             "temperature": 0.2,
         },
         timeout=60,
@@ -470,6 +470,27 @@ def _configuration_reply(result: Dict[str, Any]) -> str:
         [
             "",
             "Set `NUVOLARI_API_BASE_URL` to the Nuvolari execution API host, then this same request will call the live API instead of stopping here.",
+        ]
+    )
+    return "\n".join(lines)
+
+
+def _nuvolari_error_reply(name: str, result: Dict[str, Any]) -> str:
+    status = result.get("status")
+    data = result.get("data") or result.get("error") or result
+    lines = [
+        f"Nuvolari returned an error while running `{name}`.",
+    ]
+    if status:
+        lines.append(f"HTTP status: `{status}`")
+    lines.extend(
+        [
+            "",
+            "The OpenRouter tool call worked, but the Nuvolari endpoint/path or auth response needs attention.",
+            "If the status is 404, set the matching Vercel path env var, for example `NUVOLARI_YIELD_PATH`, `NUVOLARI_SWAP_PATH`, `NUVOLARI_BUY_PATH`, or `NUVOLARI_ADD_LIQUIDITY_PATH`.",
+            "",
+            "Nuvolari response:",
+            json.dumps(data, indent=2)[:3000],
         ]
     )
     return "\n".join(lines)
@@ -522,6 +543,13 @@ def chat_response(payload: Dict[str, Any]) -> Dict[str, Any]:
                     "health": health(),
                     "timestamp": int(time.time()),
                 }
+            if name.startswith("nuvolari_") and name not in {"nuvolari_docs_query", "nuvolari_context7_query"} and isinstance(result, dict) and not result.get("ok", False):
+                return {
+                    "reply": _nuvolari_error_reply(name, result),
+                    "tool_trace": tool_trace,
+                    "health": health(),
+                    "timestamp": int(time.time()),
+                }
             messages.append(
                 {
                     "role": "tool",
@@ -560,32 +588,42 @@ FRONTEND_HTML = """<!doctype html>
   <meta name="viewport" content="width=device-width, initial-scale=1" />
   <title>Hermes Nuvolari Agent</title>
   <style>
-    :root { color-scheme: dark; font-family: Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; background: #09110f; color: #edf7ef; }
-    * { box-sizing: border-box; } body { margin: 0; min-height: 100vh; background: #09110f; }
-    .shell { min-height: 100vh; display: grid; grid-template-columns: 320px 1fr; }
-    aside { border-right: 1px solid rgba(237,247,239,.12); padding: 24px; background: #0d1714; }
-    main { padding: 24px; display: grid; grid-template-rows: auto 1fr auto; gap: 16px; max-height: 100vh; }
-    h1 { margin: 0 0 8px; font-size: 22px; letter-spacing: 0; } p { color: rgba(237,247,239,.72); line-height: 1.5; }
+    :root { color-scheme: dark; font-family: ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; background: #07100d; color: #edf7ef; }
+    * { box-sizing: border-box; }
+    body { margin: 0; min-height: 100vh; background:
+      radial-gradient(circle at 18% 16%, rgba(104, 255, 178, .16), transparent 28%),
+      radial-gradient(circle at 88% 6%, rgba(93, 204, 255, .12), transparent 24%),
+      linear-gradient(135deg, #07100d 0%, #0c1814 48%, #080d0f 100%); }
+    body::before { content: ""; position: fixed; inset: 0; pointer-events: none; opacity: .24; background-image: linear-gradient(rgba(255,255,255,.035) 1px, transparent 1px), linear-gradient(90deg, rgba(255,255,255,.035) 1px, transparent 1px); background-size: 44px 44px; mask-image: linear-gradient(to bottom, #000, transparent 78%); }
+    .shell { position: relative; z-index: 1; min-height: 100vh; display: grid; grid-template-columns: 340px 1fr; }
+    aside { border-right: 1px solid rgba(237,247,239,.13); padding: 26px; background: rgba(8, 20, 16, .82); backdrop-filter: blur(18px); box-shadow: 18px 0 70px rgba(0,0,0,.22); }
+    main { padding: 28px; display: grid; grid-template-rows: auto 1fr auto; gap: 18px; max-height: 100vh; }
+    .kicker { margin-bottom: 14px; color: #7ee787; font-size: 11px; font-weight: 800; letter-spacing: .14em; text-transform: uppercase; }
+    h1 { margin: 0 0 8px; font-size: 24px; letter-spacing: 0; } p { color: rgba(237,247,239,.72); line-height: 1.5; }
     .status, .actions { display: grid; gap: 8px; margin-top: 20px; }
-    .pill { border: 1px solid rgba(237,247,239,.14); border-radius: 6px; padding: 10px 12px; color: rgba(237,247,239,.8); font-size: 13px; }
+    .pill { border: 1px solid rgba(237,247,239,.14); border-radius: 8px; padding: 10px 12px; color: rgba(237,247,239,.8); font-size: 13px; background: rgba(255,255,255,.035); }
     .ok { color: #7ee787; } .warn { color: #ffcc66; }
-    button, textarea, input { font: inherit; border-radius: 6px; border: 1px solid rgba(237,247,239,.16); background: #111d19; color: #edf7ef; }
-    button { padding: 10px 12px; cursor: pointer; text-align: left; } button:hover { border-color: rgba(126,231,135,.5); }
+    button, textarea, input { font: inherit; border-radius: 8px; border: 1px solid rgba(237,247,239,.16); background: rgba(17,29,25,.86); color: #edf7ef; }
+    button { padding: 11px 12px; cursor: pointer; text-align: left; transition: transform .16s ease, border-color .16s ease, background .16s ease; }
+    button:hover { border-color: rgba(126,231,135,.55); background: rgba(19,42,33,.96); transform: translateY(-1px); }
     .messages { overflow: auto; display: flex; flex-direction: column; gap: 12px; padding-right: 6px; }
-    .msg { border: 1px solid rgba(237,247,239,.12); border-radius: 8px; padding: 14px; background: rgba(255,255,255,.03); white-space: pre-wrap; }
+    .msg { border: 1px solid rgba(237,247,239,.12); border-radius: 10px; padding: 15px; background: rgba(255,255,255,.04); white-space: pre-wrap; box-shadow: 0 12px 32px rgba(0,0,0,.16); animation: rise .22s ease both; }
     .msg.user { border-color: rgba(126,231,135,.25); background: rgba(126,231,135,.06); }
     .msg .role { display: block; color: rgba(237,247,239,.52); font-size: 12px; margin-bottom: 8px; text-transform: uppercase; }
     .composer { display: grid; grid-template-columns: 1fr auto; gap: 10px; align-items: end; }
-    textarea { min-height: 74px; resize: vertical; padding: 12px; }
-    .send { min-width: 110px; text-align: center; background: #dfffe5; color: #0b1612; border: 0; font-weight: 700; }
+    textarea { min-height: 76px; resize: vertical; padding: 13px; outline: none; }
+    textarea:focus { border-color: rgba(126,231,135,.72); box-shadow: 0 0 0 4px rgba(126,231,135,.10); }
+    .send { min-width: 116px; text-align: center; background: linear-gradient(135deg, #e8ffec, #93f7b7); color: #0b1612; border: 0; font-weight: 800; }
     .trace { margin-top: 10px; font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 12px; color: rgba(237,247,239,.65); overflow: auto; }
     label { display: flex; gap: 8px; align-items: center; color: rgba(237,247,239,.75); font-size: 13px; margin-top: 12px; }
-    @media (max-width: 820px) { .shell { grid-template-columns: 1fr; } aside { border-right: 0; border-bottom: 1px solid rgba(237,247,239,.12); } main { max-height: none; min-height: 70vh; } .composer { grid-template-columns: 1fr; } }
+    @keyframes rise { from { opacity: 0; transform: translateY(8px); } to { opacity: 1; transform: translateY(0); } }
+    @media (max-width: 820px) { .shell { grid-template-columns: 1fr; } aside { border-right: 0; border-bottom: 1px solid rgba(237,247,239,.12); } main { max-height: none; min-height: 70vh; padding: 18px; } .composer { grid-template-columns: 1fr; } }
   </style>
 </head>
 <body>
   <div class="shell">
     <aside>
+      <div class="kicker">Hermes x Nuvolari</div>
       <h1>Hermes Nuvolari Agent</h1>
       <p>Ask for swaps, buys, yield routes, LP setup, or Nuvolari docs. Real execution is gated behind explicit confirmation.</p>
       <div class="status" id="status"></div>
@@ -693,9 +731,7 @@ class handler(BaseHTTPRequestHandler):
             question = urllib.parse.parse_qs(parsed.query).get("q", [""])[0]
             self._send_json(200, nuvolari_context7_query(question))
             return
-        index_path = Path(__file__).resolve().parents[1] / "public" / "index.html"
-        body = index_path.read_text() if index_path.exists() else FRONTEND_HTML
-        self._send(200, body.encode("utf-8"), "text/html; charset=utf-8")
+        self._send(200, FRONTEND_HTML.encode("utf-8"), "text/html; charset=utf-8")
 
     def do_POST(self) -> None:
         parsed = urllib.parse.urlparse(self.path)
