@@ -19,10 +19,51 @@ NUVOLARI_DOCS = {
     "agents": "https://docs.nuvolari.ai/execution-engine/agents.md",
     "insights": "https://docs.nuvolari.ai/ai-engine/insights.md",
 }
+NUVOLARI_DEFAULT_PATHS = {
+    "swap": "/v1/execution/quote",
+    "buy": "/v1/execution/quote",
+    "yield": "/v1/yields",
+    "enter_yield": "/v1/execution/quote",
+    "add_liquidity": "/v1/execution/quote",
+    "execution_quote": "/v1/execution/quote",
+    "execution_execute": "/v1/execution/execute",
+    "stablecoin_yields": "/v1/yields/stablecoins",
+}
+CHAIN_IDS = {
+    "ethereum": 1,
+    "mainnet": 1,
+    "hyperevm": 999,
+    "arbitrum": 42161,
+    "arbitrum one": 42161,
+    "bsc": 56,
+    "binance": 56,
+    "base": 8453,
+    "monad": 143,
+}
 
 
 def _env(name: str) -> str:
     return os.getenv(name, "").strip()
+
+
+def _configured_path(env_name: str, default_key: str) -> str:
+    return _env(env_name) or NUVOLARI_DEFAULT_PATHS[default_key]
+
+
+def _chain_id(value: Any) -> Optional[int]:
+    if value in (None, ""):
+        return None
+    if isinstance(value, int):
+        return value
+    text = str(value).strip()
+    if text.isdigit():
+        return int(text)
+    return CHAIN_IDS.get(text.lower())
+
+
+def _looks_address(value: str) -> bool:
+    text = (value or "").strip()
+    return text.startswith("0x") and len(text) == 42
 
 
 def _json_request(
@@ -66,9 +107,11 @@ def _nuvolari_headers() -> Dict[str, str]:
         "X-Nuvolari-Client": "Gary",
     }
     if api_key:
+        headers["x-api-key"] = api_key
         headers["X-API-Key"] = api_key
         headers["X-Nuvolari-API-Key"] = api_key
     if secret:
+        headers["x-secret-api-key"] = secret
         headers["X-API-Secret"] = secret
         headers["X-Nuvolari-API-Secret"] = secret
         headers["Authorization"] = f"Bearer {secret}"
@@ -90,11 +133,19 @@ def _nuvolari_call(path: str, payload: Dict[str, Any], method: str = "POST") -> 
             "available_docs": NUVOLARI_DOCS,
             "context7": CONTEXT7_NUVOLARI,
         }
+    method = method.upper()
+    url = f"{base_url}/{path.lstrip('/')}"
+    body = payload
+    if method == "GET":
+        query = {k: v for k, v in payload.items() if v not in ("", None, [], {})}
+        if query:
+            url = f"{url}?{urllib.parse.urlencode(query)}"
+        body = None
     return _json_request(
-        f"{base_url}/{path.lstrip('/')}",
-        method=method.upper(),
+        url,
+        method=method,
         headers=_nuvolari_headers(),
-        body=payload if method.upper() != "GET" else None,
+        body=body,
     )
 
 
@@ -123,17 +174,23 @@ def nuvolari_swap_quote(
     execute: bool = False,
 ) -> Dict[str, Any]:
     payload = {
-        "input_asset": input_asset,
-        "output_asset": output_asset,
+        "srcTokenAddress": input_asset,
+        "destTokenAddress": output_asset,
+        "srcChainId": _chain_id(input_chain),
+        "destChainId": _chain_id(output_chain) or _chain_id(input_chain),
+        "userAddress": wallet_address,
         "amount": amount,
-        "input_chain": input_chain,
-        "output_chain": output_chain,
-        "wallet_address": wallet_address,
-        "execute": bool(execute),
     }
-    path = _env("NUVOLARI_SWAP_PATH")
-    if not path:
-        return _missing_path("NUVOLARI_SWAP_PATH", "swap quotes/execution", payload, "swap")
+    missing = [key for key, value in payload.items() if value in ("", None)]
+    if missing or not _looks_address(input_asset) or not _looks_address(output_asset) or not _looks_address(wallet_address):
+        return {
+            "ok": False,
+            "needs_input": ["srcTokenAddress", "destTokenAddress", "srcChainId", "destChainId", "userAddress", "amount"],
+            "message": "Nuvolari execution quotes require token contract addresses, numeric chain IDs, user EOA address, and integer amount. Asset symbols like USDC/ETH are not enough for /v1/execution/quote.",
+            "received": payload,
+            "docs_source": "https://api.staging.nuvolari.ai/reference",
+        }
+    path = _configured_path("NUVOLARI_SWAP_PATH", "swap")
     return _nuvolari_call(
         path,
         payload,
@@ -149,16 +206,23 @@ def nuvolari_buy_asset(
     execute: bool = False,
 ) -> Dict[str, Any]:
     payload = {
-        "asset": asset,
+        "srcTokenAddress": pay_with_asset,
+        "destTokenAddress": asset,
+        "srcChainId": _chain_id(chain),
+        "destChainId": _chain_id(chain),
+        "userAddress": wallet_address,
         "amount": amount,
-        "pay_with_asset": pay_with_asset,
-        "chain": chain,
-        "wallet_address": wallet_address,
-        "execute": bool(execute),
     }
-    path = _env("NUVOLARI_BUY_PATH")
-    if not path:
-        return _missing_path("NUVOLARI_BUY_PATH", "buy execution", payload, "swap")
+    missing = [key for key, value in payload.items() if value in ("", None)]
+    if missing or not _looks_address(asset) or not _looks_address(pay_with_asset) or not _looks_address(wallet_address):
+        return {
+            "ok": False,
+            "needs_input": ["srcTokenAddress/pay_with_asset", "destTokenAddress/asset", "chainId", "userAddress", "amount"],
+            "message": "Nuvolari buy actions use /v1/execution/quote and require token contract addresses, numeric chain ID, user EOA address, and integer amount.",
+            "received": payload,
+            "docs_source": "https://api.staging.nuvolari.ai/reference",
+        }
+    path = _configured_path("NUVOLARI_BUY_PATH", "buy")
     return _nuvolari_call(
         path,
         payload,
@@ -171,19 +235,62 @@ def nuvolari_yield_opportunities(
     min_apy: str = "",
     chain: str = "",
 ) -> Dict[str, Any]:
-    payload = {
-        "underlying_asset": underlying_asset,
-        "risk_profile": risk_profile,
-        "min_apy": min_apy,
-        "chain": chain,
+    response = _nuvolari_call(_configured_path("NUVOLARI_YIELD_PATH", "yield"), {}, method="GET")
+    if not response.get("ok"):
+        return response
+    opportunities = response.get("data") if isinstance(response.get("data"), list) else []
+    chain_id = _chain_id(chain)
+    asset = (underlying_asset or "").upper()
+    min_apy_value = None
+    try:
+        min_apy_value = float(min_apy) if min_apy not in ("", None) else None
+    except (TypeError, ValueError):
+        min_apy_value = None
+
+    def matches(item: Dict[str, Any]) -> bool:
+        token = item.get("inputToken") or {}
+        if chain_id and item.get("chainId") != chain_id and token.get("chainId") != chain_id:
+            return False
+        if asset:
+            values = {
+                str(token.get("symbol", "")).upper(),
+                str(token.get("name", "")).upper(),
+                str(item.get("underlyingTokenAddress", "")).upper(),
+                str(token.get("address", "")).upper(),
+            }
+            if asset not in values:
+                return False
+        if min_apy_value is not None and float(item.get("apyBase") or 0) < min_apy_value:
+            return False
+        return True
+
+    filtered = [item for item in opportunities if isinstance(item, dict) and matches(item)]
+    filtered.sort(key=lambda item: float(item.get("apyBase") or 0), reverse=True)
+    top = filtered[:12]
+    return {
+        "ok": True,
+        "source": _configured_path("NUVOLARI_YIELD_PATH", "yield"),
+        "filters": {"underlying_asset": underlying_asset, "risk_profile": risk_profile, "min_apy": min_apy, "chain": chain, "chainId": chain_id},
+        "total_count": len(opportunities),
+        "matched_count": len(filtered),
+        "opportunities": [
+            {
+                "name": item.get("name"),
+                "protocol": (item.get("protocolProvider") or {}).get("name"),
+                "type": item.get("type"),
+                "chainId": item.get("chainId"),
+                "inputToken": item.get("inputToken"),
+                "outputToken": item.get("outputToken"),
+                "yieldAddress": item.get("yieldAddress"),
+                "apyBase": item.get("apyBase"),
+                "tvlUsd": item.get("tvlUsd"),
+                "opportunityRiskScore": item.get("opportunityRiskScore"),
+                "description": item.get("description"),
+                "protocolVaultUrl": item.get("protocolVaultUrl"),
+            }
+            for item in top
+        ],
     }
-    path = _env("NUVOLARI_YIELD_PATH")
-    if not path:
-        return _missing_path("NUVOLARI_YIELD_PATH", "yield opportunity discovery", payload, "yield")
-    return _nuvolari_call(
-        path,
-        payload,
-    )
 
 
 def nuvolari_enter_yield(
@@ -194,19 +301,18 @@ def nuvolari_enter_yield(
     execute: bool = False,
 ) -> Dict[str, Any]:
     payload = {
-        "strategy_id": strategy_id,
-        "input_asset": input_asset,
+        "destTokenAddress": strategy_id,
+        "srcTokenAddress": input_asset,
         "amount": amount,
-        "wallet_address": wallet_address,
-        "execute": bool(execute),
+        "userAddress": wallet_address,
     }
-    path = _env("NUVOLARI_ENTER_YIELD_PATH")
-    if not path:
-        return _missing_path("NUVOLARI_ENTER_YIELD_PATH", "yield strategy entry", payload, "yield")
-    return _nuvolari_call(
-        path,
-        payload,
-    )
+    return {
+        "ok": False,
+        "needs_input": ["srcChainId", "destChainId", "srcTokenAddress", "destTokenAddress", "userAddress", "amount"],
+        "message": "Use nuvolari_execution_quote for yield entry. Pass the selected opportunity output token/vault address as destTokenAddress and include source/destination chain IDs.",
+        "received": payload,
+        "docs_source": "https://api.staging.nuvolari.ai/reference",
+    }
 
 
 def nuvolari_add_liquidity(
@@ -231,13 +337,69 @@ def nuvolari_add_liquidity(
         "wallet_address": wallet_address,
         "execute": bool(execute),
     }
-    path = _env("NUVOLARI_ADD_LIQUIDITY_PATH")
-    if not path:
-        return _missing_path("NUVOLARI_ADD_LIQUIDITY_PATH", "add liquidity execution", payload, "liquidity")
+    return {
+        "ok": False,
+        "message": "The OpenAPI spec exposes generic /v1/execution/quote for executable actions, not a separate add-liquidity REST path. Use nuvolari_execution_quote with the destination vault/pool token address once selected.",
+        "received": payload,
+        "docs_source": "https://api.staging.nuvolari.ai/reference",
+    }
+
+
+def nuvolari_execution_quote(
+    srcTokenAddress: str,
+    destTokenAddress: str,
+    srcChainId: int,
+    destChainId: int,
+    userAddress: str,
+    amount: str,
+    slippagePercentage: float = 0.5,
+) -> Dict[str, Any]:
+    payload = {
+        "srcTokenAddress": srcTokenAddress,
+        "destTokenAddress": destTokenAddress,
+        "srcChainId": int(srcChainId),
+        "destChainId": int(destChainId),
+        "slippagePercentage": slippagePercentage,
+        "userAddress": userAddress,
+        "amount": amount,
+    }
+    return _nuvolari_call(_configured_path("NUVOLARI_EXECUTION_QUOTE_PATH", "execution_quote"), payload)
+
+
+def nuvolari_execute_signed_supertransaction(quoteId: str, signatures: List[str]) -> Dict[str, Any]:
     return _nuvolari_call(
-        path,
-        payload,
+        _configured_path("NUVOLARI_EXECUTION_EXECUTE_PATH", "execution_execute"),
+        {"quoteId": quoteId, "signatures": signatures},
     )
+
+
+def nuvolari_stablecoin_yields(chain: str = "", min_apy: str = "") -> Dict[str, Any]:
+    response = _nuvolari_call(_configured_path("NUVOLARI_STABLECOIN_YIELDS_PATH", "stablecoin_yields"), {}, method="GET")
+    if not response.get("ok"):
+        return response
+    opportunities = response.get("data") if isinstance(response.get("data"), list) else []
+    chain_id = _chain_id(chain)
+    try:
+        min_apy_value = float(min_apy) if min_apy not in ("", None) else None
+    except (TypeError, ValueError):
+        min_apy_value = None
+    filtered = []
+    for item in opportunities:
+        token = item.get("token") if isinstance(item, dict) else {}
+        if chain_id and token.get("chainId") != chain_id:
+            continue
+        if min_apy_value is not None and float(item.get("currentApy") or 0) < min_apy_value:
+            continue
+        filtered.append(item)
+    filtered.sort(key=lambda item: float(item.get("currentApy") or 0), reverse=True)
+    return {
+        "ok": True,
+        "source": _configured_path("NUVOLARI_STABLECOIN_YIELDS_PATH", "stablecoin_yields"),
+        "filters": {"chain": chain, "chainId": chain_id, "min_apy": min_apy},
+        "total_count": len(opportunities),
+        "matched_count": len(filtered),
+        "opportunities": filtered[:12],
+    }
 
 
 def nuvolari_raw_api(method: str, path: str, body: Optional[Dict[str, Any]] = None) -> Dict[str, Any]:
@@ -293,6 +455,9 @@ TOOL_HANDLERS = {
     "nuvolari_yield_opportunities": nuvolari_yield_opportunities,
     "nuvolari_enter_yield": nuvolari_enter_yield,
     "nuvolari_add_liquidity": nuvolari_add_liquidity,
+    "nuvolari_execution_quote": nuvolari_execution_quote,
+    "nuvolari_execute_signed_supertransaction": nuvolari_execute_signed_supertransaction,
+    "nuvolari_stablecoin_yields": nuvolari_stablecoin_yields,
     "nuvolari_raw_api": nuvolari_raw_api,
     "nuvolari_docs_query": nuvolari_docs_query,
     "nuvolari_context7_query": nuvolari_context7_query,
@@ -303,7 +468,7 @@ TOOLS = [
         "type": "function",
         "function": {
             "name": "nuvolari_swap_quote",
-            "description": "Quote or prepare a Nuvolari swap route across assets/chains. Use execute=false unless the user explicitly asks to execute.",
+            "description": "Quote a Nuvolari swap route using /v1/execution/quote. Requires token contract addresses, numeric chain IDs, user EOA, and integer amount.",
             "parameters": {
                 "type": "object",
                 "properties": {
@@ -323,7 +488,7 @@ TOOLS = [
         "type": "function",
         "function": {
             "name": "nuvolari_buy_asset",
-            "description": "Buy an asset through Nuvolari using another asset as payment.",
+            "description": "Quote buying an asset through Nuvolari using /v1/execution/quote. Requires token contract addresses, numeric chain ID, user EOA, and integer amount.",
             "parameters": {
                 "type": "object",
                 "properties": {
@@ -342,7 +507,7 @@ TOOLS = [
         "type": "function",
         "function": {
             "name": "nuvolari_yield_opportunities",
-            "description": "Find Nuvolari risk-adjusted yield opportunities by underlying asset, APY, chain, and risk profile.",
+            "description": "Fetch and filter live Nuvolari /v1/yields opportunities by underlying token symbol/address, chain, APY, and risk profile.",
             "parameters": {
                 "type": "object",
                 "properties": {
@@ -370,6 +535,55 @@ TOOLS = [
                     "execute": {"type": "boolean"},
                 },
                 "required": ["strategy_id", "input_asset", "amount"],
+            },
+        },
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "nuvolari_execution_quote",
+            "description": "Generate a Nuvolari /v1/execution/quote supertransaction quote. Use this for swaps, deposits into selected yield vaults, and cross-chain routes after exact token/vault addresses are known.",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "srcTokenAddress": {"type": "string"},
+                    "destTokenAddress": {"type": "string"},
+                    "srcChainId": {"type": "integer", "enum": [1, 143, 42161, 56, 8453, 999]},
+                    "destChainId": {"type": "integer", "enum": [1, 143, 42161, 56, 8453, 999]},
+                    "userAddress": {"type": "string"},
+                    "amount": {"type": "string"},
+                    "slippagePercentage": {"type": "number"},
+                },
+                "required": ["srcTokenAddress", "destTokenAddress", "srcChainId", "destChainId", "userAddress", "amount"],
+            },
+        },
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "nuvolari_execute_signed_supertransaction",
+            "description": "Submit signed Nuvolari /v1/execution/execute payloads for a quoteId. Only call after user explicitly provides signatures.",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "quoteId": {"type": "string"},
+                    "signatures": {"type": "array", "items": {"type": "string"}},
+                },
+                "required": ["quoteId", "signatures"],
+            },
+        },
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "nuvolari_stablecoin_yields",
+            "description": "Fetch and filter live Nuvolari /v1/yields/stablecoins opportunities by chain and APY.",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "chain": {"type": "string"},
+                    "min_apy": {"type": "string"},
+                },
             },
         },
     },
@@ -441,8 +655,9 @@ TOOLS = [
 
 SYSTEM_PROMPT = """You are Gary's Hermes Nuvolari execution agent.
 Use the Nuvolari tools whenever the user asks about swaps, buys, yield, LPs, routes, positions, or execution.
-Never invent filled trades. If execute is false or the Nuvolari API base URL is missing, explain what is ready and what config is missing.
-Context7 currently publishes Nuvolari product/documentation flows, not REST endpoint paths. Do not invent API paths.
+Never invent filled trades. If execute is false, explain what is ready and what signature/input is still needed.
+The Nuvolari REST API exposes /v1/yields, /v1/yields/stablecoins, /v1/execution/quote, and /v1/execution/execute.
+For execution quotes, require exact token/vault contract addresses, numeric chain IDs, user EOA, and integer amount.
 If a live execution tool returns needs_configuration for a path env var, stop calling more tools and explain which env var must be set.
 Before real execution, require an explicit user confirmation that includes asset, amount, chain, and wallet.
 Use nuvolari_context7_query or docs_query when the exact Nuvolari behavior is unclear."""
@@ -456,11 +671,14 @@ def health() -> Dict[str, Any]:
         "nuvolari_credentials_configured": bool(_env("NUVOLARI_API_KEY") and _env("NUVOLARI_SECRET_API_KEY")),
         "nuvolari_base_url_configured": bool(_env("NUVOLARI_API_BASE_URL")),
         "nuvolari_paths_configured": {
-            "swap": bool(_env("NUVOLARI_SWAP_PATH")),
-            "buy": bool(_env("NUVOLARI_BUY_PATH")),
-            "yield": bool(_env("NUVOLARI_YIELD_PATH")),
-            "enter_yield": bool(_env("NUVOLARI_ENTER_YIELD_PATH")),
-            "add_liquidity": bool(_env("NUVOLARI_ADD_LIQUIDITY_PATH")),
+            "swap": bool(_configured_path("NUVOLARI_SWAP_PATH", "swap")),
+            "buy": bool(_configured_path("NUVOLARI_BUY_PATH", "buy")),
+            "yield": bool(_configured_path("NUVOLARI_YIELD_PATH", "yield")),
+            "enter_yield": bool(_configured_path("NUVOLARI_ENTER_YIELD_PATH", "enter_yield")),
+            "add_liquidity": bool(_configured_path("NUVOLARI_ADD_LIQUIDITY_PATH", "add_liquidity")),
+            "execution_quote": bool(_configured_path("NUVOLARI_EXECUTION_QUOTE_PATH", "execution_quote")),
+            "execution_execute": bool(_configured_path("NUVOLARI_EXECUTION_EXECUTE_PATH", "execution_execute")),
+            "stablecoin_yields": bool(_configured_path("NUVOLARI_STABLECOIN_YIELDS_PATH", "stablecoin_yields")),
         },
         "context7_nuvolari": CONTEXT7_NUVOLARI,
     }
