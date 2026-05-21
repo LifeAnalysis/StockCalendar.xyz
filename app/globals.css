@@ -27,6 +27,7 @@ body {
   color: var(--ink);
   background: var(--bg);
   font-family: Avenir Next, Aptos, Segoe UI, sans-serif;
+  overflow-x: hidden;
 }
 
 button,
@@ -56,10 +57,36 @@ p {
 }
 
 .shell {
+  position: relative;
+  z-index: 1;
   min-height: 100vh;
   padding: 24px;
   display: grid;
   gap: 18px;
+}
+
+.dither-background {
+  position: fixed;
+  inset: 0;
+  z-index: 0;
+}
+
+.dither-background canvas {
+  display: block;
+  width: 100% !important;
+  height: 100% !important;
+}
+
+.w-full {
+  width: 100%;
+}
+
+.h-full {
+  height: 100%;
+}
+
+.relative {
+  position: relative;
 }
 
 .hero,

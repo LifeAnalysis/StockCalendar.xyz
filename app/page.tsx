@@ -1,6 +1,9 @@
 "use client";
 
+import dynamic from "next/dynamic";
 import { useEffect, useMemo, useState, type CSSProperties } from "react";
+
+const Dither = dynamic(() => import("./components/Dither"), { ssr: false });
 
 type Stock = {
   symbol: string;
@@ -389,7 +392,20 @@ export default function Page() {
   }
 
   return (
-    <main className="shell" style={{ "--accent": selectedStock?.brandColor || "#2d6cdf" } as CSSProperties}>
+    <>
+      <div className="dither-background" aria-hidden="true">
+        <Dither
+          waveColor={[0.8, 1, 0]}
+          disableAnimation={false}
+          enableMouseInteraction
+          mouseRadius={0.2}
+          colorNum={4.9}
+          waveAmplitude={0.3}
+          waveFrequency={3}
+          waveSpeed={0.05}
+        />
+      </div>
+      <main className="shell" style={{ "--accent": selectedStock?.brandColor || "#2d6cdf" } as CSSProperties}>
       <section className="hero" aria-labelledby="page-title">
         <div className="hero-copy">
           <div className="eyebrow">Hermes Robinhood Chain</div>
@@ -872,6 +888,7 @@ export default function Page() {
           <pre className="result intake-json">{JSON.stringify(intel?.agent_context || {}, null, 2)}</pre>
         </div>
       </section>
-    </main>
+      </main>
+    </>
   );
 }
