@@ -23,11 +23,17 @@ export async function GET() {
     data_pipeline: {
       intel_endpoint: "/api/robinhood/intel",
       chat_ingestion: "/api/chat",
-      agent_context: "robinhood_chain_tokens+kalshi_public_markets+public_event_calendars+explorer_discovery+recommendations"
+      agent_context: "robinhood_chain_tokens+stock_signal_feeds+kalshi_public_markets+public_event_calendars+explorer_discovery+recommendations"
     },
     kalshi: {
       base_url: process.env.KALSHI_API_BASE_URL || "https://external-api.kalshi.com/trade-api/v2",
       public_market_data: true
+    },
+    stock_signals: {
+      stooq_public_quotes: true,
+      sec_edgar_submissions: true,
+      gdelt_news: true,
+      sec_user_agent_configured: Boolean(process.env.SEC_USER_AGENT?.trim())
     }
   });
 }

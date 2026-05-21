@@ -17,6 +17,7 @@ app/api/chat/route.ts              Hermes chat fed by the same normalized intel 
 lib/robinhood.ts                   Official stock/payment token dictionary and trade rail
 lib/kalshi.ts                      Kalshi public market fetch + matcher
 lib/calendar.ts                    Public earnings/event lookup
+lib/stock-signals.ts               Stooq quotes, SEC filings, and GDELT news context
 lib/intel.ts                       Pipeline checks and compact agent context
 ```
 
@@ -31,10 +32,20 @@ KALSHI_MARKET_CACHE_SECONDS=180
 KALSHI_MAX_MARKET_PAGES=12
 KALSHI_SOURCE_TIMEOUT_MS=30000
 KALSHI_USE_BROAD_SCAN=false
-KALSHI_MAX_SEARCH_TERMS=8
+KALSHI_USE_SERIES_SCAN=false
+KALSHI_MAX_SEARCH_TERMS=32
+KALSHI_MAX_SERIES_PER_STOCK=4
 KALSHI_TARGETED_MARKET_PAGES=1
 CALENDAR_SOURCE_TIMEOUT_MS=8000
 EXPLORER_SOURCE_TIMEOUT_MS=6000
+
+STOCK_SIGNALS_TIMEOUT_MS=12000
+STOCK_SIGNALS_CACHE_SECONDS=300
+STOOQ_TIMEOUT_MS=6000
+SEC_TIMEOUT_MS=8000
+SEC_USER_AGENT=hermes-agent-backend/2.0 contact@example.com
+GDELT_TIMEOUT_MS=3000
+GDELT_MAX_RECORDS=25
 
 NUVOLARI_API_BASE_URL=https://api.staging.nuvolari.ai
 NUVOLARI_API_KEY=
@@ -52,11 +63,13 @@ ROBINHOOD_STOCK_PROVIDER=nuvolari
 
 Robinhood stock tokens are currently the official testnet contracts from `https://docs.robinhood.com/chain/contracts/`: `TSLA`, `AMZN`, `PLTR`, `NFLX`, and `AMD`, plus payment tokens `WETH` and `USDG`.
 
-Kalshi market data uses the public Trade API open-market feed, then filters locally against Robinhood stock terms. Hermes does not treat `kalshi.com/search` pages as machine-readable source data, because the website search can surface noisy or protected results that are not a clean execution signal. Calendar data uses public finance endpoints where available and always returns fallback public links for manual inspection.
+Kalshi market data uses the public Trade API series and market feeds, then filters locally against Robinhood stock symbols and company keywords such as Tesla, Amazon, Palantir, Netflix, and Advanced Micro Devices. Hermes does not treat `kalshi.com/search` pages as machine-readable source data, because the website search can surface noisy or protected results that are not a clean execution signal.
+
+Stock context comes from free/no-secret feeds: Stooq public quote CSVs, SEC EDGAR submissions, and GDELT news search. Calendar data uses public finance endpoints where available and always returns fallback public links for manual inspection.
 
 ## Data Pipeline
 
-`/api/robinhood/intel` is the aggregate source for Hermes. It returns explicit pipeline checks for Robinhood Chain token contracts, Blockscout explorer discovery, Kalshi public markets, and public event calendars, plus per-stock Hermes recommendations and a compact `agent_context` object consumed by `/api/chat`.
+`/api/robinhood/intel` is the aggregate source for Hermes. It returns explicit pipeline checks for Robinhood Chain token contracts, stock signal feeds, Blockscout explorer discovery, Kalshi public markets, and public event calendars, plus per-stock Hermes recommendations and a compact `agent_context` object consumed by `/api/chat`.
 
 `/api/chat` passes that context to OpenRouter when `OPENROUTER_API_KEY` is configured. Without OpenRouter, it still returns a deterministic pipeline-aware response and includes the raw intel payload for inspection.
 

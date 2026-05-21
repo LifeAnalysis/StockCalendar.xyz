@@ -12,6 +12,7 @@ export type RobinhoodToken = {
   chainId: number;
   aliases: string[];
   kind: "stock" | "payment";
+  secCik?: string;
   logoUrl?: string;
   brandColor?: string;
 };
@@ -59,6 +60,7 @@ export const robinhoodStockTokens: RobinhoodToken[] = [
     chainId: ROBINHOOD_CHAIN_ID,
     aliases: ["tesla", "tesla stock", "tsla"],
     kind: "stock",
+    secCik: "0001318605",
     logoUrl: "https://logo.clearbit.com/tesla.com",
     brandColor: "#e82127"
   },
@@ -69,6 +71,7 @@ export const robinhoodStockTokens: RobinhoodToken[] = [
     chainId: ROBINHOOD_CHAIN_ID,
     aliases: ["amazon", "amazon stock", "amzn"],
     kind: "stock",
+    secCik: "0001018724",
     logoUrl: "https://logo.clearbit.com/amazon.com",
     brandColor: "#ff9900"
   },
@@ -79,6 +82,7 @@ export const robinhoodStockTokens: RobinhoodToken[] = [
     chainId: ROBINHOOD_CHAIN_ID,
     aliases: ["palantir", "palantir stock", "pltr"],
     kind: "stock",
+    secCik: "0001321655",
     logoUrl: "https://logo.clearbit.com/palantir.com",
     brandColor: "#d8d8d8"
   },
@@ -89,6 +93,7 @@ export const robinhoodStockTokens: RobinhoodToken[] = [
     chainId: ROBINHOOD_CHAIN_ID,
     aliases: ["netflix", "netflix stock", "nflx"],
     kind: "stock",
+    secCik: "0001065280",
     logoUrl: "https://logo.clearbit.com/netflix.com",
     brandColor: "#e50914"
   },
@@ -99,6 +104,7 @@ export const robinhoodStockTokens: RobinhoodToken[] = [
     chainId: ROBINHOOD_CHAIN_ID,
     aliases: ["advanced micro devices", "amd stock", "amd"],
     kind: "stock",
+    secCik: "0000002488",
     logoUrl: "https://logo.clearbit.com/amd.com",
     brandColor: "#ed1c24"
   }

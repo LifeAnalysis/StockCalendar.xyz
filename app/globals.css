@@ -267,6 +267,21 @@ p {
   line-height: 1.35;
 }
 
+.stock-price {
+  border: 1px solid rgba(244, 247, 251, 0.08);
+  border-radius: 7px;
+  padding: 8px;
+  background: rgba(255, 255, 255, 0.025);
+}
+
+.stock-price strong {
+  font-size: 17px;
+}
+
+.stock-price small {
+  min-height: 0;
+}
+
 .stock-tile code,
 .route-preview code,
 .pipeline-row code {
@@ -518,6 +533,14 @@ select {
   font-size: 13px;
 }
 
+.recommendation-row span small {
+  display: block;
+  margin-top: 3px;
+  color: var(--ink);
+  font-size: 12px;
+  font-weight: 850;
+}
+
 .recommendation-row b {
   justify-self: flex-end;
 }
@@ -580,6 +603,10 @@ select {
   display: grid;
   gap: 3px;
   background: rgba(255, 255, 255, 0.02);
+}
+
+.evidence-grid {
+  margin-top: 8px;
 }
 
 .calendar-row {

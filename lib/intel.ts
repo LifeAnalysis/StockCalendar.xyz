@@ -1,6 +1,7 @@
 import { fetchStockCalendars } from "./calendar";
 import { matchStockMarkets } from "./kalshi";
 import { discoverExplorerStockTokens, robinhoodPaymentTokens, robinhoodStockTokens } from "./robinhood";
+import { fetchStockSignals } from "./stock-signals";
 
 type PipelineCheck = {
   name: string;
@@ -43,6 +44,23 @@ type StockRecommendation = {
       no_ask?: string;
       spread_note: string;
     };
+    price_snapshot?: {
+      close?: number;
+      date?: string;
+      volume?: number;
+      source: string;
+    };
+    latest_filing?: {
+      form: string;
+      filing_date?: string;
+      document_url?: string;
+    };
+    news_count: number;
+    top_news: Array<{
+      title: string;
+      url?: string;
+      domain?: string;
+    }>;
     calendar_ok: boolean;
     earnings_dates: string[];
     explorer_confirmed: boolean;
@@ -66,6 +84,9 @@ type HermesDecision = {
     routeable: boolean;
     kalshi_match: boolean;
     yes_no_prices: StockRecommendation["evidence"]["market_pricing"] | null;
+    price: StockRecommendation["evidence"]["price_snapshot"] | null;
+    latest_filing: StockRecommendation["evidence"]["latest_filing"] | null;
+    news_count: number;
     user_action: string;
   }>;
 };
@@ -73,7 +94,8 @@ type HermesDecision = {
 function buildPipelineChecks(
   kalshi: Awaited<ReturnType<typeof matchStockMarkets>>,
   calendars: Awaited<ReturnType<typeof fetchStockCalendars>>,
-  explorerDiscovery: Awaited<ReturnType<typeof discoverExplorerStockTokens>>
+  explorerDiscovery: Awaited<ReturnType<typeof discoverExplorerStockTokens>>,
+  stockSignals: Awaited<ReturnType<typeof fetchStockSignals>>
 ): PipelineCheck[] {
   return [
     {
@@ -102,6 +124,33 @@ function buildPipelineChecks(
         .filter((calendar) => !calendar.ok && calendar.error)
         .map((calendar) => `${calendar.symbol}: ${calendar.error}`)
         .join("; ") || undefined
+    },
+    {
+      name: "stooq_public_quotes",
+      ok: stockSignals.prices.some((row) => row.ok),
+      required: false,
+      source: "https://stooq.com/q/l/",
+      note: stockSignals.source_note,
+      records: stockSignals.prices.filter((row) => row.ok).length,
+      error: stockSignals.prices.filter((row) => !row.ok && row.error).map((row) => `${row.symbol}: ${row.error}`).join("; ") || undefined
+    },
+    {
+      name: "sec_edgar_filings",
+      ok: stockSignals.filings.some((row) => row.ok),
+      required: false,
+      source: "https://data.sec.gov/submissions/",
+      note: "SEC requests require SEC_USER_AGENT to identify the integration.",
+      records: stockSignals.filings.filter((row) => row.ok).length,
+      error: stockSignals.filings.filter((row) => !row.ok && row.error).map((row) => `${row.symbol}: ${row.error}`).join("; ") || undefined
+    },
+    {
+      name: "gdelt_news",
+      ok: stockSignals.news.some((row) => row.ok && row.article_count > 0),
+      required: false,
+      source: "https://api.gdeltproject.org/api/v2/doc/doc",
+      note: "Optional broad news pressure signal; ignored for BUY unless articles are returned cleanly.",
+      records: stockSignals.news.reduce((count, row) => count + row.article_count, 0),
+      error: stockSignals.news.filter((row) => !row.ok && row.error).map((row) => `${row.symbol}: ${row.error}`).join("; ") || undefined
     },
     {
       name: "explorer_stock_like_tokens",
@@ -134,7 +183,7 @@ function kalshiTimeoutFallback(): Awaited<ReturnType<typeof matchStockMarkets>> 
     ok: false,
     source: "Kalshi public markets timeout",
     scanned_markets: 0,
-    search_method: "public_markets_local_filter",
+    search_method: "public_markets_keyword_scan",
     source_note: "Kalshi public Trade API did not return before the source timeout.",
     error: "source_timeout",
     searched_terms: [],
@@ -171,10 +220,35 @@ function explorerTimeoutFallback(): Awaited<ReturnType<typeof discoverExplorerSt
   };
 }
 
+function stockSignalsTimeoutFallback(): Awaited<ReturnType<typeof fetchStockSignals>> {
+  return {
+    ok: false,
+    source_note: "Stock signal sources timed out before Hermes could use them.",
+    prices: robinhoodStockTokens.map((stock) => ({ symbol: stock.symbol, ok: false, source: "Stooq public quotes timeout", error: "source_timeout" })),
+    filings: robinhoodStockTokens.map((stock) => ({
+      symbol: stock.symbol,
+      ok: false,
+      source: "SEC EDGAR submissions timeout",
+      recent_material_count: 0,
+      recent_forms: [],
+      error: "source_timeout"
+    })),
+    news: robinhoodStockTokens.map((stock) => ({
+      symbol: stock.symbol,
+      ok: false,
+      source: "GDELT news timeout",
+      article_count: 0,
+      top_articles: [],
+      error: "source_timeout"
+    }))
+  };
+}
+
 function buildAgentContext(
   kalshi: Awaited<ReturnType<typeof matchStockMarkets>>,
   calendars: Awaited<ReturnType<typeof fetchStockCalendars>>,
   explorerDiscovery: Awaited<ReturnType<typeof discoverExplorerStockTokens>>,
+  stockSignals: Awaited<ReturnType<typeof fetchStockSignals>>,
   recommendations: StockRecommendation[],
   hermesDecision: HermesDecision
 ) {
@@ -182,6 +256,7 @@ function buildAgentContext(
     execution_boundary: "quote_preparation_only_wallet_signature_required",
     trust_policy: "only official Robinhood docs contracts are routed; explorer-discovered tokens are context only",
     kalshi_source_policy: kalshi.source_note,
+    stock_signal_policy: stockSignals.source_note,
     quote_endpoint: "/api/robinhood/trade",
     stock_tokens: robinhoodStockTokens.map((stock) => ({
       symbol: stock.symbol,
@@ -209,6 +284,18 @@ function buildAgentContext(
       estimates: calendar.estimates,
       public_links: calendar.public_links
     })),
+    stock_signals: robinhoodStockTokens.map((stock) => {
+      const price = stockSignals.prices.find((row) => row.symbol === stock.symbol);
+      const filing = stockSignals.filings.find((row) => row.symbol === stock.symbol);
+      const news = stockSignals.news.find((row) => row.symbol === stock.symbol);
+      return {
+        symbol: stock.symbol,
+        price: price?.ok ? { close: price.close, date: price.date, volume: price.volume, source: price.source } : null,
+        latest_filing: filing?.latest_material || null,
+        news_count: news?.article_count || 0,
+        top_news: (news?.top_articles || []).slice(0, 3)
+      };
+    }),
     explorer_discovered_tokens: explorerDiscovery.tokens.map((token) => ({
       symbol: token.symbol,
       name: token.name,
@@ -224,12 +311,16 @@ function buildAgentContext(
 function buildStockRecommendations(
   kalshi: Awaited<ReturnType<typeof matchStockMarkets>>,
   calendars: Awaited<ReturnType<typeof fetchStockCalendars>>,
-  explorerDiscovery: Awaited<ReturnType<typeof discoverExplorerStockTokens>>
+  explorerDiscovery: Awaited<ReturnType<typeof discoverExplorerStockTokens>>,
+  stockSignals: Awaited<ReturnType<typeof fetchStockSignals>>
 ): StockRecommendation[] {
   return robinhoodStockTokens.map((stock) => {
     const marketRow = kalshi.stocks.find((row) => row.stock.symbol === stock.symbol);
     const topMarket = marketRow?.markets[0];
     const calendar = calendars.find((row) => row.symbol === stock.symbol);
+    const price = stockSignals.prices.find((row) => row.symbol === stock.symbol);
+    const filing = stockSignals.filings.find((row) => row.symbol === stock.symbol);
+    const news = stockSignals.news.find((row) => row.symbol === stock.symbol);
     const explorerConfirmed = explorerDiscovery.tokens.some(
       (token) => token.routed_by_agent && token.address.toLowerCase() === stock.address.toLowerCase()
     );
@@ -238,13 +329,28 @@ function buildStockRecommendations(
       35 +
         (topMarket ? Math.min(topMarket.score * 5, 30) : 0) +
         (calendar?.ok ? 15 : 0) +
+        (price?.ok ? 10 : 0) +
+        (filing?.ok && filing.latest_material ? 10 : 0) +
+        Math.min((news?.article_count || 0) * 2, 8) +
         (explorerConfirmed ? 10 : 0) +
         Math.min((marketRow?.match_count || 0) * 2, 5)
     );
+    const signalCount = [
+      topMarket,
+      calendar?.ok,
+      price?.ok,
+      filing?.ok && filing.latest_material,
+      (news?.article_count || 0) > 0,
+      explorerConfirmed
+    ].filter(Boolean).length;
     const recommendation: StockRecommendation["recommendation"] =
-      topMarket && confidence >= 70 ? "prepare_quote" : topMarket || calendar?.ok ? "watch" : "wait_for_cleaner_data";
+      topMarket && confidence >= 80
+        ? "prepare_quote"
+        : signalCount >= 2
+          ? "watch"
+          : "wait_for_cleaner_data";
     const action: DecisionAction =
-      !kalshi.ok && !calendar?.ok
+      !kalshi.ok && !calendar?.ok && !price?.ok && !filing?.ok
         ? "CONFIG_NEEDED"
         : recommendation === "prepare_quote"
           ? "BUY"
@@ -271,21 +377,42 @@ function buildStockRecommendations(
               : "Kalshi market returned without complete yes/no quote fields"
         }
       : undefined;
+    const priceSnapshot = price?.ok
+      ? {
+          close: price.close,
+          date: price.date,
+          volume: price.volume,
+          source: price.source
+        }
+      : undefined;
+    const latestFiling = filing?.latest_material
+      ? {
+          form: filing.latest_material.form,
+          filing_date: filing.latest_material.filing_date,
+          document_url: filing.latest_material.document_url
+        }
+      : undefined;
+    const support = [
+      priceSnapshot?.close ? `public quote close ${priceSnapshot.close}${priceSnapshot.date ? ` on ${priceSnapshot.date}` : ""}` : "",
+      latestFiling ? `latest SEC material filing ${latestFiling.form}${latestFiling.filing_date ? ` on ${latestFiling.filing_date}` : ""}` : "",
+      news?.article_count ? `${news.article_count} recent GDELT article(s)` : "",
+      marketPricing ? marketPricing.spread_note : ""
+    ].filter(Boolean);
     const rationale =
       action === "CONFIG_NEEDED"
         ? "Required market or event sources are unavailable, so Hermes cannot form a clean Robinhood Chain stock-token recommendation."
         : recommendation === "prepare_quote"
-        ? `Official Robinhood Chain stock route is available and supporting Kalshi/event context is usable. ${marketPricing?.spread_note || ""}`.trim()
+        ? `Official Robinhood Chain stock route is available and supporting public evidence is usable. ${support.join("; ")}`.trim()
         : recommendation === "watch"
-          ? `Official Robinhood Chain stock route is available, but supporting evidence is not strong enough for a buy setup. ${marketPricing?.spread_note || ""}`.trim()
-          : "Official Robinhood Chain stock route is available, but there is no clean supporting stock-specific Kalshi market and calendar context is thin right now.";
+          ? `Official Robinhood Chain stock route is available, but supporting evidence is not strong enough for a buy setup. ${support.join("; ")}`.trim()
+          : "Official Robinhood Chain stock route is available, but supporting public market, filing, news, calendar, and Kalshi context is too thin right now.";
     const userAction =
       action === "CONFIG_NEEDED"
         ? "Fix the missing/degraded data source before presenting this as a buy recommendation."
         : recommendation === "prepare_quote"
         ? "Prepare a Robinhood Chain stock-token quote only if the user accepts the supporting evidence and wallet-signing step."
         : recommendation === "watch"
-          ? "Keep the stock on watch. Do not ask the wallet to sign until a cleaner Kalshi or calendar signal appears."
+          ? "Keep the stock on watch. Do not ask the wallet to sign until the public price, filing, news, or Kalshi evidence creates a cleaner buy setup."
           : "Do not recommend buying this Robinhood Chain stock-token right now. Show route readiness only, and wait for cleaner supporting evidence.";
 
     return {
@@ -313,6 +440,14 @@ function buildStockRecommendations(
             }
           : undefined,
         market_pricing: marketPricing,
+        price_snapshot: priceSnapshot,
+        latest_filing: latestFiling,
+        news_count: news?.article_count || 0,
+        top_news: (news?.top_articles || []).slice(0, 3).map((article) => ({
+          title: article.title,
+          url: article.url,
+          domain: article.domain
+        })),
         calendar_ok: Boolean(calendar?.ok),
         earnings_dates: (calendar?.earnings_dates || []).filter((date): date is string => Boolean(date)),
         explorer_confirmed: explorerConfirmed
@@ -324,6 +459,7 @@ function buildStockRecommendations(
 
 function buildHermesDecision(
   kalshi: Awaited<ReturnType<typeof matchStockMarkets>>,
+  stockSignals: Awaited<ReturnType<typeof fetchStockSignals>>,
   recommendations: StockRecommendation[]
 ): HermesDecision {
   const actionCounts = recommendations.reduce<Record<DecisionAction, number>>(
@@ -334,6 +470,9 @@ function buildHermesDecision(
     { BUY: 0, WATCH: 0, NO_BUY: 0, CONFIG_NEEDED: 0 }
   );
   const cleanMatches = recommendations.filter((recommendation) => recommendation.evidence.kalshi_match_count > 0);
+  const priceCount = stockSignals.prices.filter((row) => row.ok).length;
+  const filingCount = stockSignals.filings.filter((row) => row.ok && row.latest_material).length;
+  const newsCount = stockSignals.news.reduce((count, row) => count + row.article_count, 0);
   const verdict =
     actionCounts.BUY > 0
       ? "Robinhood Chain buy setup found"
@@ -345,7 +484,7 @@ function buildHermesDecision(
   const summary =
     cleanMatches.length > 0
       ? `${cleanMatches.length} stock(s) have clean supporting public Kalshi Trade API markets with yes/no pricing available for review.`
-      : `Fetched ${kalshi.scanned_markets} public Kalshi market(s) and filtered them against Robinhood stock terms, but none mapped cleanly to a Robinhood Chain stock-token buy setup.`;
+      : `Fetched ${kalshi.scanned_markets} public Kalshi market(s), ${priceCount} public quote(s), ${filingCount} SEC filing stream(s), and ${newsCount} GDELT article(s); none created a clean Robinhood Chain buy setup.`;
   const userAction =
     actionCounts.BUY > 0
       ? "Review the supporting Kalshi YES/NO prices, then prepare a Robinhood Chain quote only after the user confirms the wallet-signing step."
@@ -371,20 +510,24 @@ function buildHermesDecision(
       routeable: true,
       kalshi_match: recommendation.evidence.kalshi_match_count > 0,
       yes_no_prices: recommendation.evidence.market_pricing || null,
+      price: recommendation.evidence.price_snapshot || null,
+      latest_filing: recommendation.evidence.latest_filing || null,
+      news_count: recommendation.evidence.news_count,
       user_action: recommendation.user_action
     }))
   };
 }
 
 export async function buildStockIntel() {
-  const [kalshi, calendars, explorerDiscovery] = await Promise.all([
+  const [kalshi, calendars, explorerDiscovery, stockSignals] = await Promise.all([
     sourceTimeout(matchStockMarkets(robinhoodStockTokens), timeoutMs("KALSHI_SOURCE_TIMEOUT_MS", 30000), kalshiTimeoutFallback()),
     sourceTimeout(fetchStockCalendars(robinhoodStockTokens), timeoutMs("CALENDAR_SOURCE_TIMEOUT_MS", 8000), calendarTimeoutFallback()),
-    sourceTimeout(discoverExplorerStockTokens(), timeoutMs("EXPLORER_SOURCE_TIMEOUT_MS", 6000), explorerTimeoutFallback())
+    sourceTimeout(discoverExplorerStockTokens(), timeoutMs("EXPLORER_SOURCE_TIMEOUT_MS", 6000), explorerTimeoutFallback()),
+    sourceTimeout(fetchStockSignals(robinhoodStockTokens), timeoutMs("STOCK_SIGNALS_TIMEOUT_MS", 12000), stockSignalsTimeoutFallback())
   ]);
-  const checks = buildPipelineChecks(kalshi, calendars, explorerDiscovery);
-  const recommendations = buildStockRecommendations(kalshi, calendars, explorerDiscovery);
-  const hermesDecision = buildHermesDecision(kalshi, recommendations);
+  const checks = buildPipelineChecks(kalshi, calendars, explorerDiscovery, stockSignals);
+  const recommendations = buildStockRecommendations(kalshi, calendars, explorerDiscovery, stockSignals);
+  const hermesDecision = buildHermesDecision(kalshi, stockSignals, recommendations);
 
   return {
     ok: checks.every((check) => !check.required || check.ok),
@@ -402,10 +545,11 @@ export async function buildStockIntel() {
       source: "https://docs.robinhood.com/chain/contracts/"
     },
     explorer_discovery: explorerDiscovery,
+    stock_signals: stockSignals,
     kalshi,
     calendars,
     recommendations,
     hermes_decision: hermesDecision,
-    agent_context: buildAgentContext(kalshi, calendars, explorerDiscovery, recommendations, hermesDecision)
+    agent_context: buildAgentContext(kalshi, calendars, explorerDiscovery, stockSignals, recommendations, hermesDecision)
   };
 }

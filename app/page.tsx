@@ -43,6 +43,19 @@ type Recommendation = {
       no_ask?: string;
       spread_note: string;
     };
+    price_snapshot?: {
+      close?: number;
+      date?: string;
+      volume?: number;
+      source: string;
+    };
+    latest_filing?: {
+      form: string;
+      filing_date?: string;
+      document_url?: string;
+    };
+    news_count: number;
+    top_news: Array<{ title: string; url?: string; domain?: string }>;
     calendar_ok: boolean;
     earnings_dates: string[];
     explorer_confirmed: boolean;
@@ -92,6 +105,13 @@ type Intel = {
     scanned_markets: number;
     stocks: Array<{ stock: Stock; match_count: number; markets: Market[] }>;
   };
+  stock_signals: {
+    ok: boolean;
+    source_note: string;
+    prices: Array<{ symbol: string; ok: boolean; close?: number; date?: string; volume?: number; source: string; error?: string }>;
+    filings: Array<{ symbol: string; ok: boolean; recent_material_count: number; recent_forms: string[]; error?: string }>;
+    news: Array<{ symbol: string; ok: boolean; article_count: number; top_articles: Array<{ title: string; url?: string; domain?: string }> }>;
+  };
   calendars: Array<{
     symbol: string;
     ok: boolean;
@@ -125,6 +145,23 @@ type Health = {
 };
 
 const shortAddress = (value: string) => `${value.slice(0, 6)}...${value.slice(-4)}`;
+
+const formatPrice = (value?: number) =>
+  typeof value === "number"
+    ? new Intl.NumberFormat("en", {
+        style: "currency",
+        currency: "USD",
+        maximumFractionDigits: value >= 100 ? 2 : 4
+      }).format(value)
+    : "n/a";
+
+const formatVolume = (value?: number) =>
+  typeof value === "number"
+    ? new Intl.NumberFormat("en", {
+        notation: "compact",
+        maximumFractionDigits: 1
+      }).format(value)
+    : "n/a";
 
 const formatDate = (value?: string) => {
   if (!value) return "n/a";
@@ -322,6 +359,7 @@ export default function Page() {
           <div className="stock-grid">
             {intel?.robinhood_chain.stocks.map((stock) => {
               const recommendation = recommendationBySymbol.get(stock.symbol);
+              const price = recommendation?.evidence.price_snapshot;
               return (
                 <button
                   className={`stock-tile ${stock.symbol === selected ? "selected" : ""}`}
@@ -335,6 +373,10 @@ export default function Page() {
                   <span>
                     <strong>{stock.symbol}</strong>
                     <small>{stock.name}</small>
+                  </span>
+                  <span className="stock-price">
+                    <strong>{formatPrice(price?.close)}</strong>
+                    <small>{price?.date || "quote pending"}</small>
                   </span>
                   {recommendation ? (
                     <span className={`rec-chip ${recommendation.recommendation}`}>
@@ -454,6 +496,24 @@ export default function Page() {
                   <strong>{selectedRecommendation.evidence.explorer_confirmed ? "confirmed" : "not confirmed"}</strong>
                 </div>
               </div>
+              <div className="metric-grid evidence-grid">
+                <div>
+                  <span>Public quote</span>
+                  <strong>{formatPrice(selectedRecommendation.evidence.price_snapshot?.close)}</strong>
+                </div>
+                <div>
+                  <span>Quote date</span>
+                  <strong>{selectedRecommendation.evidence.price_snapshot?.date || "n/a"}</strong>
+                </div>
+                <div>
+                  <span>Volume</span>
+                  <strong>{formatVolume(selectedRecommendation.evidence.price_snapshot?.volume)}</strong>
+                </div>
+                <div>
+                  <span>SEC filing</span>
+                  <strong>{selectedRecommendation.evidence.latest_filing?.form || "n/a"}</strong>
+                </div>
+              </div>
               <div className="market-price-grid">
                 <div>
                   <span>YES bid / ask</span>
@@ -496,7 +556,10 @@ export default function Page() {
                 onClick={() => setSelected(row.symbol)}
               >
                 <strong>{row.symbol}</strong>
-                <span>{row.action}</span>
+                <span>
+                  {row.action}
+                  <small>{formatPrice(row.evidence.price_snapshot?.close)}</small>
+                </span>
                 <b>{row.confidence}%</b>
               </button>
             ))}

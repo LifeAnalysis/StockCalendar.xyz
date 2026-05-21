@@ -49,3 +49,33 @@ export async function fetchJson<T = unknown>(url: string, options: JsonOptions =
     clearTimeout(timeout);
   }
 }
+
+export async function fetchText(url: string, options: JsonOptions = {}): Promise<{
+  ok: boolean;
+  status: number;
+  text: string;
+  error?: string;
+}> {
+  const controller = new AbortController();
+  const timeout = setTimeout(() => controller.abort(), options.timeoutMs || 20000);
+
+  try {
+    const res = await fetch(url, {
+      method: options.method || "GET",
+      headers: {
+        Accept: "text/plain,text/csv,*/*",
+        "User-Agent": "hermes-next-agent/2.0",
+        ...(options.headers || {})
+      },
+      body: options.body ? JSON.stringify(options.body) : undefined,
+      signal: controller.signal,
+      cache: "no-store"
+    });
+    const text = await res.text();
+    return { ok: res.ok, status: res.status, text, error: res.ok ? undefined : `${res.status} ${res.statusText}`.trim() };
+  } catch (error) {
+    return { ok: false, status: 0, text: "", error: error instanceof Error ? error.message : String(error) };
+  } finally {
+    clearTimeout(timeout);
+  }
+}
