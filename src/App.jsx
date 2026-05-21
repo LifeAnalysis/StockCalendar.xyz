@@ -387,6 +387,12 @@ function ResearchTabs({ stock, hermesOutput, activeTab, setActiveTab, backend })
     (token) => token.routed_by_agent && token.address?.toLowerCase() === stock.address?.toLowerCase()
   );
   const visibleChecks = intel?.pipeline?.checks || [];
+  const openrouterTrace = hermesOutput?.tool_trace?.find((item) => item.name === "openrouter_chat");
+  const openrouterDetail = openrouterTrace?.ok
+    ? "live"
+    : openrouterTrace?.configured
+      ? "fallback"
+      : "not configured";
   const rawPayload = {
     selected: stock.symbol,
     recommendation,
@@ -511,6 +517,8 @@ function ResearchTabs({ stock, hermesOutput, activeTab, setActiveTab, backend })
               <StatusPill label="Intel" ok={backend.intel} detail={backend.intel ? "loaded" : "fallback"} />
               <StatusPill label="Trade" ok={backend.trade} detail={backend.trade ? "route ready" : "not ready"} />
               <StatusPill label="Pipeline" ok={Boolean(intel?.pipeline?.ok)} detail={intel?.pipeline?.ok ? "clean" : "degraded"} />
+              <StatusPill label="OpenRouter" ok={Boolean(openrouterTrace?.ok)} detail={openrouterDetail} />
+              <StatusPill label="Brief" ok detail={hermesOutput?.ui_brief_source === "data.recommendations" ? "Hermes data" : "unknown"} />
             </div>
             <div className="pipeline-list">
               {visibleChecks.length ? (

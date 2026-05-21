@@ -4,10 +4,13 @@ import { buildStockIntel } from "./intel";
 
 type OpenRouterResponse = {
   choices?: Array<{
+    finish_reason?: string;
     message?: {
       content?: string;
     };
   }>;
+  model?: string;
+  usage?: unknown;
   error?: unknown;
 };
 
@@ -18,10 +21,33 @@ type OpenRouterChatResult = {
   reply: string | null;
   status?: number;
   error?: string;
+  finish_reason?: string;
+  provider_model?: string;
+  usage?: unknown;
 };
 
 export const DEFAULT_HERMES_OUTPUT_PROMPT =
-  "For Tesla, Amazon, Palantir, Netflix, and AMD, should I prepare any Robinhood Chain stock-token quote right now? Use all stock feeds and Kalshi only as supporting evidence.";
+  "For Tesla, Amazon, Palantir, Netflix, and AMD, identify any Robinhood Chain stock-token quote worth preparing now. Use only the executed Hermes tool results as evidence and keep the wallet-signing boundary explicit.";
+
+const HERMES_SYSTEM_PROMPT_VERSION = "robinhood-chain-research-v3";
+
+function buildHermesSystemPrompt() {
+  return [
+    "You are Hermes Agent for Robinhood Chain stock-token execution research.",
+    "The application has already executed the required tools before this chat call. Treat DATA_PIPELINE_JSON as authoritative tool results, not as suggestions.",
+    "Do not claim to browse, search, call APIs, fetch filings, scan Kalshi, inspect explorer contracts, prepare quotes, sign transactions, or execute trades during this OpenRouter turn.",
+    "Your job is to summarize the supplied Hermes tool results for a human who may decide whether to prepare a quote.",
+    "Use only DATA_PIPELINE_JSON for chain contracts, supporting market context, prices, filings, calendars, explorer confirmation, and source status.",
+    "Robinhood Chain stock-token route readiness is the object of the recommendation. Stooq, Yahoo chart data, SEC EDGAR, GDELT, calendars, explorer search, and Kalshi are supporting evidence only.",
+    "Kalshi website search pages are not a runtime data source. Use only public Trade API records included in DATA_PIPELINE_JSON and the local stock-term filter metadata.",
+    "Every stock has a hermes_decision action: BUY, WATCH, NO_BUY, or CONFIG_NEEDED. Preserve those actions exactly; do not upgrade or downgrade them.",
+    "BUY means quote preparation may be shown, not that Hermes can execute. WATCH and NO_BUY must not ask the user to sign.",
+    "For quote prep, require exact source_asset, target_asset, wallet_address, amount, and chainId 46630.",
+    "When YES/NO prices exist, explain what they support and include bid/ask values. When no clean market exists, say the absence clearly.",
+    "If a source is degraded, say so directly and do not infer missing data.",
+    "Keep the answer concise: verdict, per-stock action, useful evidence, degraded source caveats, and the next wallet-boundary step."
+  ].join(" ");
+}
 
 function formatMoney(value?: number) {
   if (!Number.isFinite(value)) return "n/a";
@@ -88,31 +114,37 @@ async function askHermes(message: string, intel: Awaited<ReturnType<typeof build
     headers: {
       Authorization: `Bearer ${apiKey}`,
       "HTTP-Referer": "https://hermes-agent-backend.vercel.app",
+      "X-OpenRouter-Title": "Hermes Robinhood Chain",
       "X-Title": "Hermes Robinhood Chain"
     },
     body: {
       model,
+      temperature: 0.2,
       max_tokens: Number.isFinite(maxTokens) ? Math.min(Math.max(Math.trunc(maxTokens), 256), 4096) : 1200,
       messages: [
         {
           role: "system",
-          content: [
-            "You are Hermes Agent for Robinhood Chain stock-token execution research.",
-            "Use only DATA_PIPELINE_JSON for chain contracts, supporting market context, and calendars.",
-            "Your recommendation is about whether to buy, watch, or not buy the Robinhood Chain stock-token. Stooq, SEC EDGAR, GDELT, calendars, and Kalshi are only supporting evidence, never the object of the recommendation.",
-            "Kalshi website search pages are not treated as machine-readable source data. Use only the public Trade API records in DATA_PIPELINE_JSON and the local stock-term filter metadata.",
-            "Never imply that you can sign or execute a wallet transaction. You only prepare quote payloads.",
-            "For quotes, require exact source_asset, target_asset, wallet_address, amount, and chainId 46630.",
-            "Every stock has a hermes_decision action: BUY, WATCH, NO_BUY, or CONFIG_NEEDED. Use those actions and evidence instead of inventing investment advice.",
-            "When supporting Kalshi yes/no prices exist, explain what they support for the Robinhood Chain buy decision. When no clean Kalshi market exists, recommend NO_BUY or WATCH instead of forcing a buy.",
-            "If a source is degraded, say so directly instead of inventing missing data."
-          ].join(" ")
+          content: buildHermesSystemPrompt()
         },
         {
           role: "system",
           content: `DATA_PIPELINE_JSON=${JSON.stringify({
+            system_prompt_version: HERMES_SYSTEM_PROMPT_VERSION,
             timestamp: intel.timestamp,
             pipeline: intel.pipeline,
+            tool_execution_contract: {
+              model_role: "format_supplied_tool_results_only",
+              app_executed_tools: [
+                "robinhood_chain_tokens",
+                "kalshi_public_markets",
+                "public_event_calendars",
+                "stooq_public_quotes",
+                "sec_edgar_filings",
+                "gdelt_news",
+                "explorer_stock_like_tokens"
+              ],
+              wallet_boundary: "quote_preparation_only_wallet_signature_required"
+            },
             agent_context: intel.agent_context,
             hermes_decision: intel.hermes_decision
           })}`
@@ -122,35 +154,63 @@ async function askHermes(message: string, intel: Awaited<ReturnType<typeof build
     }
   });
 
-  const reply = response.data?.choices?.[0]?.message?.content?.trim() || null;
-  if (response.ok && reply) return { configured: true, ok: true, model, reply, status: response.status };
+  const choice = response.data?.choices?.[0];
+  const reply = choice?.message?.content?.trim() || null;
+  if (response.ok && reply) {
+    return {
+      configured: true,
+      ok: true,
+      model,
+      reply,
+      status: response.status,
+      finish_reason: choice?.finish_reason,
+      provider_model: response.data?.model,
+      usage: response.data?.usage
+    };
+  }
   return {
     configured: true,
     ok: false,
     model,
     reply: null,
     status: response.status,
-    error: safeOpenRouterError(response.data) || (response.ok ? "openrouter_empty_response" : "openrouter_request_failed")
+    error: safeOpenRouterError(response.data) || response.error || (response.ok ? "openrouter_empty_response" : "openrouter_request_failed"),
+    finish_reason: choice?.finish_reason,
+    provider_model: response.data?.model,
+    usage: response.data?.usage
   };
 }
 
 export async function buildHermesOutput(message = DEFAULT_HERMES_OUTPUT_PROMPT) {
   const intel = await buildStockIntel();
   const chat = await askHermes(message, intel);
+  const replySource = chat.reply ? "openrouter" : "fallback";
   const reply = chat.reply || fallbackReply(intel);
   return {
     reply,
+    reply_source: replySource,
+    ui_brief_source: "data.recommendations",
+    system_prompt_version: HERMES_SYSTEM_PROMPT_VERSION,
     hermes_decision: intel.hermes_decision,
     data: intel,
     tool_trace: [
-      { name: "buildStockIntel", ok: intel.ok, degraded_sources: intel.pipeline.degraded_sources },
+      {
+        name: "buildStockIntel",
+        ok: intel.ok,
+        role: "app_executed_tools",
+        degraded_sources: intel.pipeline.degraded_sources
+      },
       {
         name: "openrouter_chat",
         ok: chat.ok,
         configured: chat.configured,
+        role: "summarize_tool_results",
         model: chat.model,
+        provider_model: chat.provider_model,
         status: chat.status,
-        error: chat.error
+        finish_reason: chat.finish_reason,
+        error: chat.error,
+        usage: chat.usage
       }
     ]
   };
