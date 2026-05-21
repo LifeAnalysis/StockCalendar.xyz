@@ -19,7 +19,7 @@
   --green: #1f7a53;
   --amber: #886412;
   --shadow: none;
-  --radius: 0;
+  --radius: 8px;
   font-family: Helvetica, Arial, sans-serif;
   background: transparent;
   color: var(--foreground);
@@ -139,7 +139,7 @@ ul {
   width: 34px;
   height: 34px;
   border: 1px solid var(--line-strong);
-  border-radius: 7px;
+  border-radius: var(--radius);
   background: var(--logo-bg, #fff);
   color: var(--logo-fg, var(--foreground));
   display: grid;
@@ -166,7 +166,7 @@ ul {
 .ticker-pill .logo {
   width: 26px;
   height: 26px;
-  border-radius: 4px;
+  border-radius: 6px;
 }
 
 .ticker-pill strong {
@@ -328,7 +328,7 @@ select {
 
 .swap-tabs button {
   border: 0;
-  border-radius: 6px;
+  border-radius: calc(var(--radius) - 2px);
   background: transparent;
   color: #666666;
   font-weight: 950;
@@ -1190,11 +1190,6 @@ select {
   letter-spacing: 0;
 }
 
-.detail-stack {
-  display: grid;
-  gap: 12px;
-}
-
 .cn-card {
   border: 1px solid var(--border);
   border-radius: var(--radius);
@@ -1210,6 +1205,71 @@ select {
 
 .cn-card-content {
   min-width: 0;
+}
+
+.research-box {
+  display: grid;
+  gap: 16px;
+}
+
+.research-box .chart-shell,
+.research-box .stock-chart-card,
+.research-box .score-card,
+.research-box .research-brief,
+.research-box .insight-card {
+  border: 0;
+  border-radius: 0;
+  background: transparent;
+  box-shadow: none;
+}
+
+.research-box .stock-chart-card {
+  overflow: visible;
+}
+
+.research-box .stock-chart-card-header,
+.research-box .stock-chart-card-content,
+.research-box .cn-card-content,
+.research-box .insight-body {
+  padding: 0;
+}
+
+.research-box .stock-chart-card-header,
+.research-box .insight-tabs {
+  border: 0;
+}
+
+.research-box .chart-range-control {
+  background: rgba(255, 255, 255, 0.64);
+}
+
+.research-brief {
+  display: grid;
+  gap: 10px;
+}
+
+.research-box .insight-tabs {
+  background: transparent;
+  padding: 0;
+}
+
+.research-box .insight-body {
+  padding-top: 12px;
+}
+
+.research-box .detail-metric,
+.research-box .evidence-item,
+.research-box .market-item,
+.research-box .pipeline-item,
+.research-box .status-pill {
+  border: 0;
+  background: transparent;
+  padding: 0;
+}
+
+.research-box .detail-metric,
+.research-box .status-pill {
+  min-height: auto;
 }
 
 .cn-button,
@@ -1572,7 +1632,7 @@ select {
 .insight-tabs button {
   min-height: 38px;
   border: 0;
-  border-radius: 6px;
+  border-radius: calc(var(--radius) - 2px);
   background: transparent;
   color: #666666;
   padding: 0 8px;

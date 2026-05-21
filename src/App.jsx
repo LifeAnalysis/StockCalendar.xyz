@@ -940,14 +940,12 @@ function App() {
                 </div>
               </div>
               </div>
-            <div className="detail-stack">
+            <div className="research-box">
               <StockChartView data={selectedChartData} ticker={stock.symbol} status={chartStatus} range={chartRange} onRangeChange={setChartRange} />
               <HermesOutputBar stock={stock} hermesOutput={hermesOutput} />
-              <div className="cn-card">
-                <div className="cn-card-content flex flex-col gap-3">
-                  <span className="font-medium">Research brief</span>
-                  <ul className="research-list">{(stock.bullets || []).map((item) => <li key={item}>{item}</li>)}</ul>
-                </div>
+              <div className="research-brief">
+                <span className="font-medium">Research brief</span>
+                <ul className="research-list">{(stock.bullets || []).map((item) => <li key={item}>{item}</li>)}</ul>
               </div>
               <ResearchTabs
                 stock={stock}
