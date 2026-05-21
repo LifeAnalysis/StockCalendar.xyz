@@ -3,6 +3,8 @@ import { fetchJson } from "./http";
 import { RobinhoodToken, robinhoodStockTokens } from "./robinhood";
 
 const KALSHI_BASE_URL = "https://external-api.kalshi.com/trade-api/v2";
+const KALSHI_SOURCE_NOTE =
+  "Kalshi website search is not used as a data source; Hermes uses the public Trade API open-market feed and local Robinhood stock-term filtering.";
 
 export type KalshiMarket = {
   ticker: string;
@@ -77,11 +79,17 @@ function maxKalshiPages(): number {
   return Number.isFinite(value) ? Math.max(1, Math.min(Math.trunc(value), 40)) : 12;
 }
 
-export async function fetchKalshiMarkets(maxPages = maxKalshiPages()): Promise<{ ok: boolean; markets: KalshiMarket[]; error?: string; source: string }> {
+export async function fetchKalshiMarkets(maxPages = maxKalshiPages()): Promise<{
+  ok: boolean;
+  markets: KalshiMarket[];
+  error?: string;
+  source: string;
+  source_note: string;
+}> {
   const configuredTtl = Number(env("KALSHI_MARKET_CACHE_SECONDS", "180"));
   const ttlMs = (Number.isFinite(configuredTtl) ? Math.max(0, configuredTtl) : 180) * 1000;
   if (marketCache && Date.now() - marketCache.ts < ttlMs) {
-    return { ok: true, markets: marketCache.value, source: "cache" };
+    return { ok: true, markets: marketCache.value, source: "cache", source_note: KALSHI_SOURCE_NOTE };
   }
 
   const markets: KalshiMarket[] = [];
@@ -91,7 +99,13 @@ export async function fetchKalshiMarkets(maxPages = maxKalshiPages()): Promise<{
     if (cursor) params.set("cursor", cursor);
     const response = await fetchJson<MarketsResponse>(`${kalshiBaseUrl()}/markets?${params.toString()}`, { timeoutMs: 25000 });
     if (!response.ok || !response.data) {
-      return { ok: false, markets, error: response.error || JSON.stringify(response.data || {}), source: kalshiBaseUrl() };
+      return {
+        ok: false,
+        markets,
+        error: response.error || JSON.stringify(response.data || {}),
+        source: kalshiBaseUrl(),
+        source_note: KALSHI_SOURCE_NOTE
+      };
     }
     markets.push(...(response.data.markets || []));
     cursor = response.data.cursor || "";
@@ -99,7 +113,7 @@ export async function fetchKalshiMarkets(maxPages = maxKalshiPages()): Promise<{
   }
 
   marketCache = { ts: Date.now(), value: markets };
-  return { ok: true, markets, source: `${kalshiBaseUrl()}/markets` };
+  return { ok: true, markets, source: `${kalshiBaseUrl()}/markets`, source_note: KALSHI_SOURCE_NOTE };
 }
 
 function stockSearchQueries(stocks: RobinhoodToken[]): string[] {
@@ -117,6 +131,8 @@ async function fetchTargetedKalshiMarkets(stocks: RobinhoodToken[]): Promise<{
   markets: KalshiMarket[];
   error?: string;
   source: string;
+  search_method: "public_markets_local_filter";
+  source_note: string;
   searched_terms: string[];
 }> {
   const searchedTerms = stockSearchQueries(stocks);
@@ -127,7 +143,9 @@ async function fetchTargetedKalshiMarkets(stocks: RobinhoodToken[]): Promise<{
     ok: feed.ok,
     markets: feed.markets,
     error: feed.error,
-    source: `${kalshiBaseUrl()}/markets local stock-term filter`,
+    source: `${kalshiBaseUrl()}/markets public-feed local-filter`,
+    search_method: "public_markets_local_filter",
+    source_note: KALSHI_SOURCE_NOTE,
     searched_terms: searchedTerms
   };
 }
@@ -135,7 +153,7 @@ async function fetchTargetedKalshiMarkets(stocks: RobinhoodToken[]): Promise<{
 export async function matchStockMarkets(stocks = robinhoodStockTokens) {
   const feed =
     env("KALSHI_USE_BROAD_SCAN", "") === "true"
-      ? { ...(await fetchKalshiMarkets()), searched_terms: [] }
+      ? { ...(await fetchKalshiMarkets()), search_method: "public_markets_feed" as const, searched_terms: [] }
       : await fetchTargetedKalshiMarkets(stocks);
   const bySymbol = stocks.map((stock) => {
     const matches = feed.markets
@@ -173,6 +191,8 @@ export async function matchStockMarkets(stocks = robinhoodStockTokens) {
     source: feed.source,
     error: feed.error,
     scanned_markets: feed.markets.length,
+    search_method: feed.search_method,
+    source_note: feed.source_note,
     searched_terms: feed.searched_terms,
     stocks: bySymbol
   };

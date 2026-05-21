@@ -7,6 +7,7 @@ type PipelineCheck = {
   ok: boolean;
   required: boolean;
   source: string;
+  note?: string;
   records: number;
   error?: string;
 };
@@ -52,6 +53,7 @@ type StockRecommendation = {
 type HermesDecision = {
   verdict: string;
   summary: string;
+  source_note: string;
   searched_terms: string[];
   action_counts: Record<DecisionAction, number>;
   user_action: string;
@@ -86,6 +88,7 @@ function buildPipelineChecks(
       ok: kalshi.ok,
       required: false,
       source: kalshi.source,
+      note: kalshi.source_note,
       records: kalshi.scanned_markets,
       error: kalshi.error
     },
@@ -131,6 +134,8 @@ function kalshiTimeoutFallback(): Awaited<ReturnType<typeof matchStockMarkets>> 
     ok: false,
     source: "Kalshi public markets timeout",
     scanned_markets: 0,
+    search_method: "public_markets_local_filter",
+    source_note: "Kalshi public Trade API did not return before the source timeout.",
     error: "source_timeout",
     searched_terms: [],
     stocks: robinhoodStockTokens.map((stock) => ({ stock, match_count: 0, markets: [] }))
@@ -176,6 +181,7 @@ function buildAgentContext(
   return {
     execution_boundary: "quote_preparation_only_wallet_signature_required",
     trust_policy: "only official Robinhood docs contracts are routed; explorer-discovered tokens are context only",
+    kalshi_source_policy: kalshi.source_note,
     quote_endpoint: "/api/robinhood/trade",
     stock_tokens: robinhoodStockTokens.map((stock) => ({
       symbol: stock.symbol,
@@ -338,8 +344,8 @@ function buildHermesDecision(
           : "No Robinhood Chain buy setup right now";
   const summary =
     cleanMatches.length > 0
-      ? `${cleanMatches.length} stock(s) have clean supporting Kalshi markets with yes/no pricing available for review.`
-      : `Kalshi returned ${kalshi.scanned_markets} supporting candidate market(s), but none mapped cleanly to a Robinhood Chain stock-token buy setup.`;
+      ? `${cleanMatches.length} stock(s) have clean supporting public Kalshi Trade API markets with yes/no pricing available for review.`
+      : `Fetched ${kalshi.scanned_markets} public Kalshi market(s) and filtered them against Robinhood stock terms, but none mapped cleanly to a Robinhood Chain stock-token buy setup.`;
   const userAction =
     actionCounts.BUY > 0
       ? "Review the supporting Kalshi YES/NO prices, then prepare a Robinhood Chain quote only after the user confirms the wallet-signing step."
@@ -352,6 +358,7 @@ function buildHermesDecision(
   return {
     verdict,
     summary,
+    source_note: kalshi.source_note,
     searched_terms: kalshi.searched_terms || [],
     action_counts: actionCounts,
     user_action: userAction,

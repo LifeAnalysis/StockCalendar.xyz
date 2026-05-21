@@ -68,7 +68,7 @@ type Intel = {
     ok: boolean;
     required_ok: boolean;
     degraded_sources: string[];
-    checks: Array<{ name: string; ok: boolean; required: boolean; source: string; records: number; error?: string }>;
+    checks: Array<{ name: string; ok: boolean; required: boolean; source: string; note?: string; records: number; error?: string }>;
   };
   robinhood_chain: {
     stocks: Stock[];
@@ -85,6 +85,10 @@ type Intel = {
     tokens: ExplorerToken[];
   };
   kalshi: {
+    source: string;
+    source_note: string;
+    search_method: string;
+    searched_terms: string[];
     scanned_markets: number;
     stocks: Array<{ stock: Stock; match_count: number; markets: Market[] }>;
   };
@@ -100,6 +104,7 @@ type Intel = {
   hermes_decision: {
     verdict: string;
     summary: string;
+    source_note: string;
     user_action: string;
     action_counts: Record<"BUY" | "WATCH" | "NO_BUY" | "CONFIG_NEEDED", number>;
   };
@@ -267,7 +272,7 @@ export default function Page() {
           <h1 id="page-title">Stock-token command center</h1>
           <p>
             Prepare wallet-signed stock-token routes, inspect the active token universe, and compare each symbol against
-            Kalshi and calendar context.
+            public Kalshi Trade API context and calendars.
           </p>
         </div>
         <div className="hero-actions">
@@ -504,10 +509,11 @@ export default function Page() {
           <div className="section-head">
             <div>
               <div className="eyebrow">Market context</div>
-              <h2>Kalshi matches</h2>
+              <h2>Public Kalshi matches</h2>
             </div>
             <span className="count">{selectedMarkets.length} found</span>
           </div>
+          {intel?.kalshi.source_note ? <p className="source-note">{intel.kalshi.source_note}</p> : null}
           <div className="market-list">
             {selectedMarkets.length ? (
               selectedMarkets.map((market) => (
@@ -540,7 +546,7 @@ export default function Page() {
             ) : (
               <div className="empty-state">
                 <strong>No clean market match for {selected}</strong>
-                <p>The matcher is avoiding weak sports, politics, and noisy cross-asset hits.</p>
+                <p>The public API feed was filtered locally, so noisy website search results are not promoted into a buy call.</p>
               </div>
             )}
           </div>
@@ -638,6 +644,7 @@ export default function Page() {
                 <div>
                   <strong>{check.name.replaceAll("_", " ")}</strong>
                   <span>{check.source}</span>
+                  {check.note ? <span>{check.note}</span> : null}
                 </div>
                 <div>
                   <span>{check.required ? "required" : "optional"}</span>

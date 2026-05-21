@@ -44,11 +44,11 @@ function fallbackReply(message: string, intel: Awaited<ReturnType<typeof buildSt
   const recommendations = decision.stocks
     .map((row) => `- ${row.symbol}: ${row.action}. ${row.reason} ${row.yes_no_prices ? row.yes_no_prices.spread_note : "No clean YES/NO stock-market price."}`)
     .join("\n");
-  const searched = intel.kalshi.searched_terms?.length ? ` Searched Kalshi terms: ${intel.kalshi.searched_terms.join(", ")}.` : "";
+  const searched = intel.kalshi.searched_terms?.length ? ` Filtered Kalshi terms: ${intel.kalshi.searched_terms.join(", ")}.` : "";
   return [
     `Verdict: ${decision.verdict}.`,
     decision.summary,
-    `Context: ${intel.robinhood_chain.stock_count} Robinhood Chain stock tokens, ${intel.robinhood_chain.payment_tokens.length} payment tokens, ${intel.kalshi.scanned_markets} Kalshi supporting candidate markets, and ${intel.calendars.length} public calendar feeds.${searched}${degraded}`,
+    `Context: ${intel.robinhood_chain.stock_count} Robinhood Chain stock tokens, ${intel.robinhood_chain.payment_tokens.length} payment tokens, ${intel.kalshi.scanned_markets} public Kalshi markets fetched, and ${intel.calendars.length} public calendar feeds.${searched} Source policy: ${intel.hermes_decision.source_note}${degraded}`,
     "Per stock:",
     recommendations,
     `Action: ${decision.user_action}`
@@ -79,6 +79,7 @@ async function askHermes(message: string, intel: Awaited<ReturnType<typeof build
             "You are Hermes Agent for Robinhood Chain stock-token execution research.",
             "Use only DATA_PIPELINE_JSON for chain contracts, supporting market context, and calendars.",
             "Your recommendation is about whether to buy, watch, or not buy the Robinhood Chain stock-token. Kalshi is only supporting evidence, never the object of the recommendation.",
+            "Kalshi website search pages are not treated as machine-readable source data. Use only the public Trade API records in DATA_PIPELINE_JSON and the local stock-term filter metadata.",
             "Never imply that you can sign or execute a wallet transaction. You only prepare quote payloads.",
             "For quotes, require exact source_asset, target_asset, wallet_address, amount, and chainId 46630.",
             "Every stock has a hermes_decision action: BUY, WATCH, NO_BUY, or CONFIG_NEEDED. Use those actions and evidence instead of inventing investment advice.",

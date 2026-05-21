@@ -534,6 +534,13 @@ select {
   gap: 10px;
 }
 
+.source-note {
+  margin: -2px 0 10px;
+  color: var(--muted);
+  font-size: 13px;
+  line-height: 1.4;
+}
+
 .market-row,
 .empty-state,
 .calendar-row,

@@ -52,7 +52,7 @@ ROBINHOOD_STOCK_PROVIDER=nuvolari
 
 Robinhood stock tokens are currently the official testnet contracts from `https://docs.robinhood.com/chain/contracts/`: `TSLA`, `AMZN`, `PLTR`, `NFLX`, and `AMD`, plus payment tokens `WETH` and `USDG`.
 
-Kalshi market data uses the public Trade API. Calendar data uses public finance endpoints where available and always returns fallback public links for manual inspection.
+Kalshi market data uses the public Trade API open-market feed, then filters locally against Robinhood stock terms. Hermes does not treat `kalshi.com/search` pages as machine-readable source data, because the website search can surface noisy or protected results that are not a clean execution signal. Calendar data uses public finance endpoints where available and always returns fallback public links for manual inspection.
 
 ## Data Pipeline
 
