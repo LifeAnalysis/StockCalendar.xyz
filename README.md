@@ -50,7 +50,7 @@ Kalshi market data uses the public Trade API. Calendar data uses public finance 
 
 ## Data Pipeline
 
-`/api/robinhood/intel` is the aggregate source for Hermes. It returns explicit pipeline checks for Robinhood Chain token contracts, Kalshi public markets, and public event calendars, plus a compact `agent_context` object consumed by `/api/chat`.
+`/api/robinhood/intel` is the aggregate source for Hermes. It returns explicit pipeline checks for Robinhood Chain token contracts, Blockscout explorer discovery, Kalshi public markets, and public event calendars, plus per-stock Hermes recommendations and a compact `agent_context` object consumed by `/api/chat`.
 
 `/api/chat` passes that context to OpenRouter when `OPENROUTER_API_KEY` is configured. Without OpenRouter, it still returns a deterministic pipeline-aware response and includes the raw intel payload for inspection.
 

@@ -116,7 +116,7 @@ export function robinhoodExplorer(): string {
   return env("ROBINHOOD_CHAIN_EXPLORER_URL", ROBINHOOD_EXPLORER).replace(/\/$/, "");
 }
 
-const stockSearchTerms = ["stock", "AAPL", "GOOG", "MSFT", "NVDA", "META"];
+const stockSearchTerms = ["stock", ...robinhoodStockTokens.map((stock) => stock.symbol), "AAPL", "GOOG", "MSFT", "NVDA", "META"];
 
 function classifyExplorerToken(item: {
   address_hash?: string;
@@ -174,7 +174,7 @@ export async function discoverExplorerStockTokens() {
   }
 
   const tokens = Array.from(byAddress.values()).sort((a, b) => {
-    const trustOrder = { official: 0, protocol_wrapper: 1, third_party_or_mock: 2 };
+    const trustOrder = { official: 0, third_party_or_mock: 1, protocol_wrapper: 2 };
     return trustOrder[a.trust_level] - trustOrder[b.trust_level] || a.symbol.localeCompare(b.symbol) || a.name.localeCompare(b.name);
   });
 

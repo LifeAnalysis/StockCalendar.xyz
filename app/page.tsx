@@ -24,6 +24,23 @@ type Market = {
   volume_24h_fp?: string;
 };
 
+type Recommendation = {
+  symbol: string;
+  recommendation: "prepare_quote" | "watch" | "wait_for_cleaner_data";
+  label: string;
+  confidence: number;
+  rationale: string;
+  evidence: {
+    official_contract: string;
+    kalshi_match_count: number;
+    top_kalshi_market?: Market;
+    calendar_ok: boolean;
+    earnings_dates: string[];
+    explorer_confirmed: boolean;
+  };
+  quote_requirements: string[];
+};
+
 type ExplorerToken = {
   symbol: string;
   name: string;
@@ -38,9 +55,16 @@ type ExplorerToken = {
 type Intel = {
   ok: boolean;
   timestamp: string;
+  pipeline: {
+    ok: boolean;
+    required_ok: boolean;
+    degraded_sources: string[];
+    checks: Array<{ name: string; ok: boolean; required: boolean; source: string; records: number; error?: string }>;
+  };
   robinhood_chain: {
     stocks: Stock[];
     payment_tokens: Stock[];
+    stock_count?: number;
     source: string;
   };
   explorer_discovery?: {
@@ -63,6 +87,8 @@ type Intel = {
     estimates: { earnings_average?: string; revenue_average?: string };
     public_links: string[];
   }>;
+  recommendations: Recommendation[];
+  agent_context: unknown;
 };
 
 type Health = {
@@ -169,6 +195,14 @@ export default function Page() {
     [intel, selected]
   );
   const selectedCalendar = useMemo(() => intel?.calendars.find((row) => row.symbol === selected), [intel, selected]);
+  const selectedRecommendation = useMemo(
+    () => intel?.recommendations.find((row) => row.symbol === selected),
+    [intel, selected]
+  );
+  const recommendationBySymbol = useMemo(
+    () => new Map((intel?.recommendations || []).map((row) => [row.symbol, row])),
+    [intel]
+  );
   const explorerOtherTokens = useMemo(
     () => intel?.explorer_discovery?.tokens.filter((token) => !token.routed_by_agent).slice(0, 12) || [],
     [intel]
@@ -266,23 +300,31 @@ export default function Page() {
           </div>
 
           <div className="stock-grid">
-            {intel?.robinhood_chain.stocks.map((stock) => (
-              <button
-                className={`stock-tile ${stock.symbol === selected ? "selected" : ""}`}
-                key={stock.symbol}
-                onClick={() => setSelected(stock.symbol)}
-                type="button"
-                style={{ "--brand": stock.brandColor || "#2d6cdf" } as CSSProperties}
-                aria-pressed={stock.symbol === selected}
-              >
-                <Logo stock={stock} />
-                <span>
-                  <strong>{stock.symbol}</strong>
-                  <small>{stock.name}</small>
-                </span>
-                <code>{shortAddress(stock.address)}</code>
-              </button>
-            ))}
+            {intel?.robinhood_chain.stocks.map((stock) => {
+              const recommendation = recommendationBySymbol.get(stock.symbol);
+              return (
+                <button
+                  className={`stock-tile ${stock.symbol === selected ? "selected" : ""}`}
+                  key={stock.symbol}
+                  onClick={() => setSelected(stock.symbol)}
+                  type="button"
+                  style={{ "--brand": stock.brandColor || "#2d6cdf" } as CSSProperties}
+                  aria-pressed={stock.symbol === selected}
+                >
+                  <Logo stock={stock} />
+                  <span>
+                    <strong>{stock.symbol}</strong>
+                    <small>{stock.name}</small>
+                  </span>
+                  {recommendation ? (
+                    <span className={`rec-chip ${recommendation.recommendation}`}>
+                      {recommendation.label} <b>{recommendation.confidence}%</b>
+                    </span>
+                  ) : null}
+                  <code>{shortAddress(stock.address)}</code>
+                </button>
+              );
+            })}
           </div>
         </section>
 
@@ -354,6 +396,75 @@ export default function Page() {
           {tradeResult ? <pre className="result">{JSON.stringify(tradeResult, null, 2)}</pre> : null}
         </section>
       </div>
+
+      <section className="recommendation-band" aria-label="Hermes recommendations">
+        <div className="context-panel recommendation-panel">
+          <div className="section-head">
+            <div>
+              <div className="eyebrow">Hermes recommendation</div>
+              <h2>{selected} execution posture</h2>
+            </div>
+            {selectedRecommendation ? (
+              <span className={`rec-chip ${selectedRecommendation.recommendation}`}>
+                {selectedRecommendation.label} <b>{selectedRecommendation.confidence}%</b>
+              </span>
+            ) : null}
+          </div>
+
+          {selectedRecommendation ? (
+            <div className="recommendation-detail">
+              <p>{selectedRecommendation.rationale}</p>
+              <div className="metric-grid">
+                <div>
+                  <span>Contract</span>
+                  <strong>{shortAddress(selectedRecommendation.evidence.official_contract)}</strong>
+                </div>
+                <div>
+                  <span>Kalshi matches</span>
+                  <strong>{selectedRecommendation.evidence.kalshi_match_count}</strong>
+                </div>
+                <div>
+                  <span>Calendar</span>
+                  <strong>{selectedRecommendation.evidence.calendar_ok ? "returned" : "links only"}</strong>
+                </div>
+                <div>
+                  <span>Explorer</span>
+                  <strong>{selectedRecommendation.evidence.explorer_confirmed ? "confirmed" : "not confirmed"}</strong>
+                </div>
+              </div>
+            </div>
+          ) : (
+            <div className="empty-state">
+              <strong>No recommendation returned</strong>
+              <p>Refresh the pipeline to rebuild Hermes recommendations.</p>
+            </div>
+          )}
+        </div>
+
+        <div className="context-panel recommendation-panel">
+          <div className="section-head">
+            <div>
+              <div className="eyebrow">Per-stock output</div>
+              <h2>All recommendations</h2>
+            </div>
+            <span className="count">{intel?.recommendations.length || 0} stocks</span>
+          </div>
+          <div className="recommendation-list">
+            {intel?.recommendations.map((row) => (
+              <button
+                className={`recommendation-row ${row.symbol === selected ? "selected" : ""}`}
+                key={row.symbol}
+                type="button"
+                onClick={() => setSelected(row.symbol)}
+              >
+                <strong>{row.symbol}</strong>
+                <span>{row.label}</span>
+                <b>{row.confidence}%</b>
+              </button>
+            ))}
+          </div>
+        </div>
+      </section>
 
       <section className="insight-grid" aria-label="Market and event context">
         <div className="context-panel">
@@ -477,6 +588,33 @@ export default function Page() {
               </div>
             )}
           </div>
+        </div>
+
+        <div className="context-panel pipeline-panel">
+          <div className="section-head">
+            <div>
+              <div className="eyebrow">Hermes intake</div>
+              <h2>Fetched and passed data</h2>
+            </div>
+            <span className="count">{intel?.pipeline.ok ? "clean" : "degraded"}</span>
+          </div>
+
+          <div className="pipeline-checks">
+            {intel?.pipeline.checks.map((check) => (
+              <div className="pipeline-row" key={check.name}>
+                <div>
+                  <strong>{check.name.replaceAll("_", " ")}</strong>
+                  <span>{check.source}</span>
+                </div>
+                <div>
+                  <span>{check.required ? "required" : "optional"}</span>
+                  <b>{check.ok ? `${check.records} records` : check.error || "unavailable"}</b>
+                </div>
+              </div>
+            ))}
+          </div>
+
+          <pre className="result intake-json">{JSON.stringify(intel?.agent_context || {}, null, 2)}</pre>
         </div>
       </section>
     </main>

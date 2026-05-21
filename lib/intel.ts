@@ -11,6 +11,31 @@ type PipelineCheck = {
   error?: string;
 };
 
+type StockRecommendation = {
+  symbol: string;
+  recommendation: "prepare_quote" | "watch" | "wait_for_cleaner_data";
+  label: string;
+  confidence: number;
+  rationale: string;
+  evidence: {
+    official_contract: string;
+    kalshi_match_count: number;
+    top_kalshi_market?: {
+      ticker: string;
+      title?: string;
+      score: number;
+      yes_bid_dollars?: string;
+      yes_ask_dollars?: string;
+      liquidity_dollars?: string;
+      close_time?: string;
+    };
+    calendar_ok: boolean;
+    earnings_dates: string[];
+    explorer_confirmed: boolean;
+  };
+  quote_requirements: ["source_asset", "target_asset", "wallet_address", "amount"];
+};
+
 function buildPipelineChecks(
   kalshi: Awaited<ReturnType<typeof matchStockMarkets>>,
   calendars: Awaited<ReturnType<typeof fetchStockCalendars>>,
@@ -57,7 +82,8 @@ function buildPipelineChecks(
 function buildAgentContext(
   kalshi: Awaited<ReturnType<typeof matchStockMarkets>>,
   calendars: Awaited<ReturnType<typeof fetchStockCalendars>>,
-  explorerDiscovery: Awaited<ReturnType<typeof discoverExplorerStockTokens>>
+  explorerDiscovery: Awaited<ReturnType<typeof discoverExplorerStockTokens>>,
+  recommendations: StockRecommendation[]
 ) {
   return {
     execution_boundary: "quote_preparation_only_wallet_signature_required",
@@ -95,8 +121,73 @@ function buildAgentContext(
       address: token.address,
       trust_level: token.trust_level,
       routed_by_agent: token.routed_by_agent
-    }))
+    })),
+    recommendations
   };
+}
+
+function buildStockRecommendations(
+  kalshi: Awaited<ReturnType<typeof matchStockMarkets>>,
+  calendars: Awaited<ReturnType<typeof fetchStockCalendars>>,
+  explorerDiscovery: Awaited<ReturnType<typeof discoverExplorerStockTokens>>
+): StockRecommendation[] {
+  return robinhoodStockTokens.map((stock) => {
+    const marketRow = kalshi.stocks.find((row) => row.stock.symbol === stock.symbol);
+    const topMarket = marketRow?.markets[0];
+    const calendar = calendars.find((row) => row.symbol === stock.symbol);
+    const explorerConfirmed = explorerDiscovery.tokens.some(
+      (token) => token.routed_by_agent && token.address.toLowerCase() === stock.address.toLowerCase()
+    );
+    const confidence = Math.min(
+      95,
+      35 +
+        (topMarket ? Math.min(topMarket.score * 5, 30) : 0) +
+        (calendar?.ok ? 15 : 0) +
+        (explorerConfirmed ? 10 : 0) +
+        Math.min((marketRow?.match_count || 0) * 2, 5)
+    );
+    const recommendation: StockRecommendation["recommendation"] =
+      topMarket && confidence >= 70 ? "prepare_quote" : topMarket || calendar?.ok ? "watch" : "wait_for_cleaner_data";
+    const label =
+      recommendation === "prepare_quote"
+        ? "Prepare quote"
+        : recommendation === "watch"
+          ? "Watch"
+          : "Wait for cleaner data";
+    const rationale =
+      recommendation === "prepare_quote"
+        ? "Official contract is routeable and Hermes found usable market or event context."
+        : recommendation === "watch"
+          ? "Official contract is routeable, but the evidence is not strong enough for an execution ticket."
+          : "Official contract is routeable, but public market and calendar context are thin right now.";
+
+    return {
+      symbol: stock.symbol,
+      recommendation,
+      label,
+      confidence,
+      rationale,
+      evidence: {
+        official_contract: stock.address,
+        kalshi_match_count: marketRow?.match_count || 0,
+        top_kalshi_market: topMarket
+          ? {
+              ticker: topMarket.ticker,
+              title: topMarket.title,
+              score: topMarket.score,
+              yes_bid_dollars: topMarket.yes_bid_dollars,
+              yes_ask_dollars: topMarket.yes_ask_dollars,
+              liquidity_dollars: topMarket.liquidity_dollars,
+              close_time: topMarket.close_time
+            }
+          : undefined,
+        calendar_ok: Boolean(calendar?.ok),
+        earnings_dates: (calendar?.earnings_dates || []).filter((date): date is string => Boolean(date)),
+        explorer_confirmed: explorerConfirmed
+      },
+      quote_requirements: ["source_asset", "target_asset", "wallet_address", "amount"]
+    };
+  });
 }
 
 export async function buildStockIntel() {
@@ -106,6 +197,7 @@ export async function buildStockIntel() {
     discoverExplorerStockTokens()
   ]);
   const checks = buildPipelineChecks(kalshi, calendars, explorerDiscovery);
+  const recommendations = buildStockRecommendations(kalshi, calendars, explorerDiscovery);
 
   return {
     ok: checks.every((check) => !check.required || check.ok),
@@ -125,6 +217,7 @@ export async function buildStockIntel() {
     explorer_discovery: explorerDiscovery,
     kalshi,
     calendars,
-    agent_context: buildAgentContext(kalshi, calendars, explorerDiscovery)
+    recommendations,
+    agent_context: buildAgentContext(kalshi, calendars, explorerDiscovery, recommendations)
   };
 }
