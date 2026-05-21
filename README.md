@@ -29,6 +29,9 @@ OPENROUTER_MODEL=deepseek/deepseek-v4-flash
 KALSHI_API_BASE_URL=https://external-api.kalshi.com/trade-api/v2
 KALSHI_MARKET_CACHE_SECONDS=180
 KALSHI_MAX_MARKET_PAGES=12
+KALSHI_SOURCE_TIMEOUT_MS=15000
+CALENDAR_SOURCE_TIMEOUT_MS=8000
+EXPLORER_SOURCE_TIMEOUT_MS=6000
 
 NUVOLARI_API_BASE_URL=https://api.staging.nuvolari.ai
 NUVOLARI_API_KEY=
@@ -56,8 +59,13 @@ Kalshi market data uses the public Trade API. Calendar data uses public finance 
 
 ## Development
 
+`npm run dev` validates local runtime env, clears stale `.next` output, builds, and starts the app exactly like production. Use `.env.local` for real local values; Vercel encrypted or sensitive env vars can pull as empty strings, so do not assume `vercel env pull` produced a usable local file.
+
 ```bash
 npm install
+npm run env:check
 npm run dev
 npm run build
 ```
+
+For hot reload, use `npm run dev:watch`. For UI-only work without external integrations, use `npm run dev:loose`.

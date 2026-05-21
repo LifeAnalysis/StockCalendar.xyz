@@ -492,7 +492,7 @@ select {
 }
 
 .recommendation-row b {
-  justify-self: end;
+  justify-self: flex-end;
 }
 
 .insight-grid {
@@ -593,7 +593,7 @@ select {
 }
 
 .discovery-row div:last-child {
-  justify-items: end;
+  justify-items: flex-end;
   text-align: right;
 }
 
@@ -635,7 +635,7 @@ select {
 }
 
 .pipeline-row div:last-child {
-  justify-items: end;
+  justify-items: flex-end;
   text-align: right;
 }
 

@@ -22,7 +22,10 @@ export async function fetchPublicCalendar(stock: RobinhoodToken) {
     { timeoutMs: 12000 }
   );
   const earnings = yahoo.data?.quoteSummary?.result?.[0]?.calendarEvents?.earnings;
-  const earningsDate = earnings?.earningsDate?.map((item) => item.fmt || (item.raw ? new Date(item.raw * 1000).toISOString().slice(0, 10) : null)).filter(Boolean) || [];
+  const earningsDate =
+    earnings?.earningsDate
+      ?.map((item) => item.fmt || (item.raw ? new Date(item.raw * 1000).toISOString().slice(0, 10) : null))
+      .filter((value): value is string => Boolean(value)) || [];
 
   return {
     symbol: stock.symbol,

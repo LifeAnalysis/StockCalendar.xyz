@@ -79,6 +79,60 @@ function buildPipelineChecks(
   ];
 }
 
+function timeoutMs(name: string, fallback: number): number {
+  const value = Number(process.env[name] || "");
+  return Number.isFinite(value) && value > 0 ? Math.trunc(value) : fallback;
+}
+
+function sourceTimeout<T>(promise: Promise<T>, ms: number, fallback: T): Promise<T> {
+  return new Promise((resolve) => {
+    const timer = setTimeout(() => resolve(fallback), ms);
+    promise
+      .then((value) => resolve(value))
+      .catch(() => resolve(fallback))
+      .finally(() => clearTimeout(timer));
+  });
+}
+
+function kalshiTimeoutFallback(): Awaited<ReturnType<typeof matchStockMarkets>> {
+  return {
+    ok: false,
+    source: "Kalshi public markets timeout",
+    scanned_markets: 0,
+    error: "source_timeout",
+    stocks: robinhoodStockTokens.map((stock) => ({ stock, match_count: 0, markets: [] }))
+  };
+}
+
+function calendarTimeoutFallback(): Awaited<ReturnType<typeof fetchStockCalendars>> {
+  return robinhoodStockTokens.map((stock) => ({
+    symbol: stock.symbol,
+    ok: false,
+    status: 0,
+    source: "Yahoo Finance calendarEvents timeout",
+    error: "source_timeout",
+    earnings_dates: [],
+    estimates: { earnings_average: undefined, revenue_average: undefined },
+    public_links: [
+      `https://finance.yahoo.com/calendar/earnings?symbol=${stock.symbol}`,
+      `https://www.nasdaq.com/market-activity/stocks/${stock.symbol.toLowerCase()}/earnings`
+    ]
+  }));
+}
+
+function explorerTimeoutFallback(): Awaited<ReturnType<typeof discoverExplorerStockTokens>> {
+  return {
+    ok: false,
+    source: "Robinhood Chain explorer search timeout",
+    searched_terms: [],
+    stock_like_count: 0,
+    official_count: 0,
+    other_count: 0,
+    tokens: [],
+    error: "source_timeout"
+  };
+}
+
 function buildAgentContext(
   kalshi: Awaited<ReturnType<typeof matchStockMarkets>>,
   calendars: Awaited<ReturnType<typeof fetchStockCalendars>>,
@@ -192,9 +246,9 @@ function buildStockRecommendations(
 
 export async function buildStockIntel() {
   const [kalshi, calendars, explorerDiscovery] = await Promise.all([
-    matchStockMarkets(robinhoodStockTokens),
-    fetchStockCalendars(robinhoodStockTokens),
-    discoverExplorerStockTokens()
+    sourceTimeout(matchStockMarkets(robinhoodStockTokens), timeoutMs("KALSHI_SOURCE_TIMEOUT_MS", 15000), kalshiTimeoutFallback()),
+    sourceTimeout(fetchStockCalendars(robinhoodStockTokens), timeoutMs("CALENDAR_SOURCE_TIMEOUT_MS", 8000), calendarTimeoutFallback()),
+    sourceTimeout(discoverExplorerStockTokens(), timeoutMs("EXPLORER_SOURCE_TIMEOUT_MS", 6000), explorerTimeoutFallback())
   ]);
   const checks = buildPipelineChecks(kalshi, calendars, explorerDiscovery);
   const recommendations = buildStockRecommendations(kalshi, calendars, explorerDiscovery);

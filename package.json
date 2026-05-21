@@ -4,7 +4,10 @@
   "private": true,
   "description": "Next.js Hermes command center for Nuvolari, Robinhood Chain stocks, and Kalshi intelligence.",
   "scripts": {
-    "dev": "next dev",
+    "dev": "node scripts/check-local-env.mjs && rm -rf .next && next build && next start",
+    "dev:watch": "node scripts/check-local-env.mjs && rm -rf .next && next dev",
+    "dev:loose": "next dev",
+    "env:check": "node scripts/check-local-env.mjs",
     "build": "next build",
     "start": "next start",
     "check": "next lint && next build"

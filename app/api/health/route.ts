@@ -23,7 +23,7 @@ export async function GET() {
     data_pipeline: {
       intel_endpoint: "/api/robinhood/intel",
       chat_ingestion: "/api/chat",
-      agent_context: "robinhood_chain_tokens+kalshi_public_markets+public_event_calendars"
+      agent_context: "robinhood_chain_tokens+kalshi_public_markets+public_event_calendars+explorer_discovery+recommendations"
     },
     kalshi: {
       base_url: process.env.KALSHI_API_BASE_URL || "https://external-api.kalshi.com/trade-api/v2",
