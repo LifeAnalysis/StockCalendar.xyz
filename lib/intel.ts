@@ -11,9 +11,12 @@ type PipelineCheck = {
   error?: string;
 };
 
+type DecisionAction = "BUY" | "WATCH" | "NO_BUY" | "CONFIG_NEEDED";
+
 type StockRecommendation = {
   symbol: string;
   recommendation: "prepare_quote" | "watch" | "wait_for_cleaner_data";
+  action: DecisionAction;
   label: string;
   confidence: number;
   rationale: string;
@@ -44,6 +47,25 @@ type StockRecommendation = {
     explorer_confirmed: boolean;
   };
   quote_requirements: ["source_asset", "target_asset", "wallet_address", "amount"];
+};
+
+type HermesDecision = {
+  verdict: string;
+  summary: string;
+  searched_terms: string[];
+  action_counts: Record<DecisionAction, number>;
+  user_action: string;
+  stocks: Array<{
+    symbol: string;
+    action: DecisionAction;
+    label: string;
+    confidence: number;
+    reason: string;
+    routeable: boolean;
+    kalshi_match: boolean;
+    yes_no_prices: StockRecommendation["evidence"]["market_pricing"] | null;
+    user_action: string;
+  }>;
 };
 
 function buildPipelineChecks(
@@ -148,7 +170,8 @@ function buildAgentContext(
   kalshi: Awaited<ReturnType<typeof matchStockMarkets>>,
   calendars: Awaited<ReturnType<typeof fetchStockCalendars>>,
   explorerDiscovery: Awaited<ReturnType<typeof discoverExplorerStockTokens>>,
-  recommendations: StockRecommendation[]
+  recommendations: StockRecommendation[],
+  hermesDecision: HermesDecision
 ) {
   return {
     execution_boundary: "quote_preparation_only_wallet_signature_required",
@@ -187,7 +210,8 @@ function buildAgentContext(
       trust_level: token.trust_level,
       routed_by_agent: token.routed_by_agent
     })),
-    recommendations
+    recommendations,
+    hermes_decision: hermesDecision
   };
 }
 
@@ -213,12 +237,22 @@ function buildStockRecommendations(
     );
     const recommendation: StockRecommendation["recommendation"] =
       topMarket && confidence >= 70 ? "prepare_quote" : topMarket || calendar?.ok ? "watch" : "wait_for_cleaner_data";
+    const action: DecisionAction =
+      !kalshi.ok && !calendar?.ok
+        ? "CONFIG_NEEDED"
+        : recommendation === "prepare_quote"
+          ? "BUY"
+          : recommendation === "watch"
+            ? "WATCH"
+            : "NO_BUY";
     const label =
-      recommendation === "prepare_quote"
-        ? "Prepare quote"
-        : recommendation === "watch"
+      action === "BUY"
+        ? "Buy setup"
+        : action === "WATCH"
           ? "Watch"
-          : "Wait for cleaner data";
+          : action === "CONFIG_NEEDED"
+            ? "Config needed"
+            : "No buy";
     const marketPricing = topMarket
       ? {
           yes_bid: topMarket.yes_bid_dollars,
@@ -232,21 +266,26 @@ function buildStockRecommendations(
         }
       : undefined;
     const rationale =
-      recommendation === "prepare_quote"
-        ? `Official contract is routeable and Hermes found usable Kalshi/event context. ${marketPricing?.spread_note || ""}`.trim()
+      action === "CONFIG_NEEDED"
+        ? "Required market or event sources are unavailable, so Hermes cannot form a clean Robinhood Chain stock-token recommendation."
+        : recommendation === "prepare_quote"
+        ? `Official Robinhood Chain stock route is available and supporting Kalshi/event context is usable. ${marketPricing?.spread_note || ""}`.trim()
         : recommendation === "watch"
-          ? `Official contract is routeable, but the evidence is not strong enough for an execution ticket. ${marketPricing?.spread_note || ""}`.trim()
-          : "Official contract is routeable, but there is no clean stock-specific Kalshi market and calendar context is thin right now.";
+          ? `Official Robinhood Chain stock route is available, but supporting evidence is not strong enough for a buy setup. ${marketPricing?.spread_note || ""}`.trim()
+          : "Official Robinhood Chain stock route is available, but there is no clean supporting stock-specific Kalshi market and calendar context is thin right now.";
     const userAction =
-      recommendation === "prepare_quote"
-        ? "Review the top Kalshi yes/no market and prepare a Robinhood Chain quote only if the user accepts the market read and wallet-signing step."
+      action === "CONFIG_NEEDED"
+        ? "Fix the missing/degraded data source before presenting this as a buy recommendation."
+        : recommendation === "prepare_quote"
+        ? "Prepare a Robinhood Chain stock-token quote only if the user accepts the supporting evidence and wallet-signing step."
         : recommendation === "watch"
           ? "Keep the stock on watch. Do not ask the wallet to sign until a cleaner Kalshi or calendar signal appears."
-          : "Do not use Kalshi as a trade trigger for this stock right now. Show the official stock-token route, but wait for cleaner market data before recommending action.";
+          : "Do not recommend buying this Robinhood Chain stock-token right now. Show route readiness only, and wait for cleaner supporting evidence.";
 
     return {
       symbol: stock.symbol,
       recommendation,
+      action,
       label,
       confidence,
       rationale,
@@ -277,14 +316,68 @@ function buildStockRecommendations(
   });
 }
 
+function buildHermesDecision(
+  kalshi: Awaited<ReturnType<typeof matchStockMarkets>>,
+  recommendations: StockRecommendation[]
+): HermesDecision {
+  const actionCounts = recommendations.reduce<Record<DecisionAction, number>>(
+    (counts, recommendation) => {
+      counts[recommendation.action] += 1;
+      return counts;
+    },
+    { BUY: 0, WATCH: 0, NO_BUY: 0, CONFIG_NEEDED: 0 }
+  );
+  const cleanMatches = recommendations.filter((recommendation) => recommendation.evidence.kalshi_match_count > 0);
+  const verdict =
+    actionCounts.BUY > 0
+      ? "Robinhood Chain buy setup found"
+      : actionCounts.WATCH > 0
+        ? "Watch only: no buy setup yet"
+        : actionCounts.CONFIG_NEEDED > 0
+          ? "Configuration needed before acting"
+          : "No Robinhood Chain buy setup right now";
+  const summary =
+    cleanMatches.length > 0
+      ? `${cleanMatches.length} stock(s) have clean supporting Kalshi markets with yes/no pricing available for review.`
+      : `Kalshi returned ${kalshi.scanned_markets} supporting candidate market(s), but none mapped cleanly to a Robinhood Chain stock-token buy setup.`;
+  const userAction =
+    actionCounts.BUY > 0
+      ? "Review the supporting Kalshi YES/NO prices, then prepare a Robinhood Chain quote only after the user confirms the wallet-signing step."
+      : actionCounts.WATCH > 0
+        ? "Keep the Robinhood Chain stock route visible, but wait for cleaner supporting evidence before recommending a buy."
+        : actionCounts.CONFIG_NEEDED > 0
+          ? "Fix the degraded data source first; do not present a buy recommendation."
+          : "Do not recommend buying. Show route readiness only, and wait for clean stock-specific supporting evidence.";
+
+  return {
+    verdict,
+    summary,
+    searched_terms: kalshi.searched_terms || [],
+    action_counts: actionCounts,
+    user_action: userAction,
+    stocks: recommendations.map((recommendation) => ({
+      symbol: recommendation.symbol,
+      action: recommendation.action,
+      label: recommendation.label,
+      confidence: recommendation.confidence,
+      reason: recommendation.rationale,
+      routeable: true,
+      kalshi_match: recommendation.evidence.kalshi_match_count > 0,
+      yes_no_prices: recommendation.evidence.market_pricing || null,
+      user_action: recommendation.user_action
+    }))
+  };
+}
+
 export async function buildStockIntel() {
   const [kalshi, calendars, explorerDiscovery] = await Promise.all([
-    sourceTimeout(matchStockMarkets(robinhoodStockTokens), timeoutMs("KALSHI_SOURCE_TIMEOUT_MS", 15000), kalshiTimeoutFallback()),
+    sourceTimeout(matchStockMarkets(robinhoodStockTokens), timeoutMs("KALSHI_SOURCE_TIMEOUT_MS", 30000), kalshiTimeoutFallback()),
     sourceTimeout(fetchStockCalendars(robinhoodStockTokens), timeoutMs("CALENDAR_SOURCE_TIMEOUT_MS", 8000), calendarTimeoutFallback()),
     sourceTimeout(discoverExplorerStockTokens(), timeoutMs("EXPLORER_SOURCE_TIMEOUT_MS", 6000), explorerTimeoutFallback())
   ]);
   const checks = buildPipelineChecks(kalshi, calendars, explorerDiscovery);
   const recommendations = buildStockRecommendations(kalshi, calendars, explorerDiscovery);
+  const hermesDecision = buildHermesDecision(kalshi, recommendations);
 
   return {
     ok: checks.every((check) => !check.required || check.ok),
@@ -305,6 +398,7 @@ export async function buildStockIntel() {
     kalshi,
     calendars,
     recommendations,
-    agent_context: buildAgentContext(kalshi, calendars, explorerDiscovery, recommendations)
+    hermes_decision: hermesDecision,
+    agent_context: buildAgentContext(kalshi, calendars, explorerDiscovery, recommendations, hermesDecision)
   };
 }

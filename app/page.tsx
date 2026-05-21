@@ -27,6 +27,7 @@ type Market = {
 type Recommendation = {
   symbol: string;
   recommendation: "prepare_quote" | "watch" | "wait_for_cleaner_data";
+  action: "BUY" | "WATCH" | "NO_BUY" | "CONFIG_NEEDED";
   label: string;
   confidence: number;
   rationale: string;
@@ -96,6 +97,12 @@ type Intel = {
     public_links: string[];
   }>;
   recommendations: Recommendation[];
+  hermes_decision: {
+    verdict: string;
+    summary: string;
+    user_action: string;
+    action_counts: Record<"BUY" | "WATCH" | "NO_BUY" | "CONFIG_NEEDED", number>;
+  };
   agent_context: unknown;
 };
 
@@ -409,8 +416,8 @@ export default function Page() {
         <div className="context-panel recommendation-panel">
           <div className="section-head">
             <div>
-              <div className="eyebrow">Hermes recommendation</div>
-              <h2>{selected} execution posture</h2>
+              <div className="eyebrow">Hermes verdict</div>
+              <h2>{intel?.hermes_decision.verdict || `${selected} execution posture`}</h2>
             </div>
             {selectedRecommendation ? (
               <span className={`rec-chip ${selectedRecommendation.recommendation}`}>
@@ -421,6 +428,7 @@ export default function Page() {
 
           {selectedRecommendation ? (
             <div className="recommendation-detail">
+              {intel?.hermes_decision.summary ? <p>{intel.hermes_decision.summary}</p> : null}
               <p>{selectedRecommendation.rationale}</p>
               <p className="action-line">{selectedRecommendation.user_action}</p>
               <div className="metric-grid">
@@ -483,7 +491,7 @@ export default function Page() {
                 onClick={() => setSelected(row.symbol)}
               >
                 <strong>{row.symbol}</strong>
-                <span>{row.label}</span>
+                <span>{row.action}</span>
                 <b>{row.confidence}%</b>
               </button>
             ))}

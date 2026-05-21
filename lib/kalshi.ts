@@ -120,29 +120,14 @@ async function fetchTargetedKalshiMarkets(stocks: RobinhoodToken[]): Promise<{
   searched_terms: string[];
 }> {
   const searchedTerms = stockSearchQueries(stocks);
-  const responses = [];
-  for (const query of searchedTerms) {
-    const params = new URLSearchParams({ limit: "100", status: "open", search: query });
-    responses.push(await fetchJson<MarketsResponse>(`${kalshiBaseUrl()}/markets?${params.toString()}`, { timeoutMs: 12000 }));
-  }
-  const marketsByTicker = new Map<string, KalshiMarket>();
-  const errors: string[] = [];
-
-  for (const response of responses) {
-    if (!response.ok || !response.data) {
-      errors.push(response.error || `status ${response.status}`);
-      continue;
-    }
-    for (const market of response.data.markets || []) {
-      if (market.ticker) marketsByTicker.set(market.ticker, market);
-    }
-  }
+  const pageCount = Number(env("KALSHI_TARGETED_MARKET_PAGES", "1"));
+  const feed = await fetchKalshiMarkets(Number.isFinite(pageCount) ? Math.max(1, Math.trunc(pageCount)) : 1);
 
   return {
-    ok: errors.length < responses.length,
-    markets: Array.from(marketsByTicker.values()),
-    error: errors.join("; ") || undefined,
-    source: `${kalshiBaseUrl()}/markets targeted stock queries`,
+    ok: feed.ok,
+    markets: feed.markets,
+    error: feed.error,
+    source: `${kalshiBaseUrl()}/markets local stock-term filter`,
     searched_terms: searchedTerms
   };
 }

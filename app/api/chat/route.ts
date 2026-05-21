@@ -39,16 +39,20 @@ function wantsStockIntel(message: string): boolean {
 }
 
 function fallbackReply(message: string, intel: Awaited<ReturnType<typeof buildStockIntel>>) {
-  if (message.includes("trade") || message.includes("quote") || message.includes("buy") || message.includes("sell")) {
-    return "Hermes has the Robinhood Chain token universe and can prepare a Nuvolari quote through /api/robinhood/trade. A quote still needs exact source and target token contracts, wallet EOA, and integer base-unit amount; Hermes cannot sign.";
-  }
-
+  const decision = intel.hermes_decision;
   const degraded = intel.pipeline.degraded_sources.length ? ` Degraded sources: ${intel.pipeline.degraded_sources.join(", ")}.` : "";
-  const recommendations = intel.recommendations
-    .map((row) => `${row.symbol}: ${row.label} (${row.confidence}%) - ${row.user_action}`)
-    .join("; ");
+  const recommendations = decision.stocks
+    .map((row) => `- ${row.symbol}: ${row.action}. ${row.reason} ${row.yes_no_prices ? row.yes_no_prices.spread_note : "No clean YES/NO stock-market price."}`)
+    .join("\n");
   const searched = intel.kalshi.searched_terms?.length ? ` Searched Kalshi terms: ${intel.kalshi.searched_terms.join(", ")}.` : "";
-  return `Hermes is fed with ${intel.robinhood_chain.stock_count} Robinhood stock tokens, ${intel.robinhood_chain.payment_tokens.length} payment tokens, ${intel.kalshi.scanned_markets} Kalshi candidate markets, and ${intel.calendars.length} public calendar feeds.${searched} Recommendations: ${recommendations}.${degraded}`;
+  return [
+    `Verdict: ${decision.verdict}.`,
+    decision.summary,
+    `Context: ${intel.robinhood_chain.stock_count} Robinhood Chain stock tokens, ${intel.robinhood_chain.payment_tokens.length} payment tokens, ${intel.kalshi.scanned_markets} Kalshi supporting candidate markets, and ${intel.calendars.length} public calendar feeds.${searched}${degraded}`,
+    "Per stock:",
+    recommendations,
+    `Action: ${decision.user_action}`
+  ].join("\n");
 }
 
 async function askHermes(message: string, intel: Awaited<ReturnType<typeof buildStockIntel>>) {
@@ -73,11 +77,12 @@ async function askHermes(message: string, intel: Awaited<ReturnType<typeof build
           role: "system",
           content: [
             "You are Hermes Agent for Robinhood Chain stock-token execution research.",
-            "Use only DATA_PIPELINE_JSON for chain contracts, market context, and calendars.",
+            "Use only DATA_PIPELINE_JSON for chain contracts, supporting market context, and calendars.",
+            "Your recommendation is about whether to buy, watch, or not buy the Robinhood Chain stock-token. Kalshi is only supporting evidence, never the object of the recommendation.",
             "Never imply that you can sign or execute a wallet transaction. You only prepare quote payloads.",
             "For quotes, require exact source_asset, target_asset, wallet_address, amount, and chainId 46630.",
-            "Every stock has a recommendation in DATA_PIPELINE_JSON; use those labels and evidence instead of inventing investment advice.",
-            "When Kalshi yes/no prices exist, explain them. When no clean Kalshi market exists, tell the user to wait instead of forcing a trade.",
+            "Every stock has a hermes_decision action: BUY, WATCH, NO_BUY, or CONFIG_NEEDED. Use those actions and evidence instead of inventing investment advice.",
+            "When supporting Kalshi yes/no prices exist, explain what they support for the Robinhood Chain buy decision. When no clean Kalshi market exists, recommend NO_BUY or WATCH instead of forcing a buy.",
             "If a source is degraded, say so directly instead of inventing missing data."
           ].join(" ")
         },
@@ -86,7 +91,8 @@ async function askHermes(message: string, intel: Awaited<ReturnType<typeof build
           content: `DATA_PIPELINE_JSON=${JSON.stringify({
             timestamp: intel.timestamp,
             pipeline: intel.pipeline,
-            agent_context: intel.agent_context
+            agent_context: intel.agent_context,
+            hermes_decision: intel.hermes_decision
           })}`
         },
         { role: "user", content: message }
@@ -106,6 +112,7 @@ export async function POST(request: Request) {
     const reply = (await askHermes(message, intel)) || fallbackReply(message, intel);
     return jsonResponse({
       reply,
+      hermes_decision: intel.hermes_decision,
       data: intel,
       tool_trace: [
         { name: "buildStockIntel", ok: intel.ok, degraded_sources: intel.pipeline.degraded_sources },
