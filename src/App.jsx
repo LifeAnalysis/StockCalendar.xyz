@@ -100,6 +100,45 @@ function ArrowDownIcon() {
   );
 }
 
+function shortAddress(value) {
+  if (!value || typeof value !== "string") return "n/a";
+  return `${value.slice(0, 6)}...${value.slice(-4)}`;
+}
+
+function formatMoney(value) {
+  const number = Number(value);
+  if (!Number.isFinite(number)) return value || "n/a";
+  return new Intl.NumberFormat("en", {
+    style: "currency",
+    currency: "USD",
+    maximumFractionDigits: number >= 100 ? 2 : 4
+  }).format(number);
+}
+
+function formatCompact(value) {
+  const number = Number(value);
+  if (!Number.isFinite(number)) return value || "n/a";
+  return new Intl.NumberFormat("en", {
+    notation: "compact",
+    maximumFractionDigits: 1
+  }).format(number);
+}
+
+function formatDate(value) {
+  if (!value) return "n/a";
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) return value;
+  return new Intl.DateTimeFormat("en", { month: "short", day: "numeric", year: "numeric" }).format(date);
+}
+
+function hostLabel(value) {
+  try {
+    return new URL(value).hostname.replace(/^www\./, "");
+  } catch {
+    return "source";
+  }
+}
+
 function TokenButton({ token, placeholder, onClick, accent }) {
   return (
     <button className={`swap-token-button ${accent ? "accent" : ""}`} type="button" onClick={onClick}>
@@ -184,6 +223,48 @@ function TokenPicker({ open, title, items, selectedSymbol, onSelect, onClose }) 
   );
 }
 
+function DetailMetric({ label, value, tone }) {
+  return (
+    <div className={`detail-metric ${tone || ""}`}>
+      <span>{label}</span>
+      <strong>{value || "n/a"}</strong>
+    </div>
+  );
+}
+
+function StatusPill({ label, ok, detail }) {
+  return (
+    <span className={`status-pill ${ok ? "ok" : "degraded"}`}>
+      <b>{label}</b>
+      <span>{detail || (ok ? "ok" : "degraded")}</span>
+    </span>
+  );
+}
+
+function QuoteReceipt({ quote }) {
+  if (!quote) return null;
+  const ok = quote.ok !== false && !quote.error && !quote.needs_configuration;
+  const request = quote.intended_request || quote.request || quote.payload || {};
+  return (
+    <div className="quote-receipt" aria-live="polite">
+      <div className="quote-receipt-head">
+        <span>Quote receipt</span>
+        <strong>{ok ? "Ready" : quote.needs_configuration ? "Config needed" : "Review"}</strong>
+      </div>
+      <div className="receipt-grid">
+        <DetailMetric label="Provider" value={quote.provider || quote.route?.provider || "auto"} />
+        <DetailMetric label="Action" value={quote.action || request.action} />
+        <DetailMetric label="Amount" value={quote.amount || request.amount} />
+        <DetailMetric label="Status" value={quote.needs_configuration || quote.error || quote.status || (ok ? "prepared" : "returned")} />
+      </div>
+      <details className="raw-details">
+        <summary>Raw response</summary>
+        <pre>{JSON.stringify(quote, null, 2)}</pre>
+      </details>
+    </div>
+  );
+}
+
 function StockChartView({ data, ticker, status }) {
   return data?.length ? (
     <React.Suspense fallback={<div className="chart-fallback" />}>
@@ -192,6 +273,175 @@ function StockChartView({ data, ticker, status }) {
   ) : (
     <div className="chart-fallback chart-state">
       {status === "loading" ? "Loading Yahoo chart..." : "Chart unavailable from Yahoo."}
+    </div>
+  );
+}
+
+function ResearchTabs({ stock, hermesOutput, activeTab, setActiveTab, backend }) {
+  const intel = hermesOutput?.data;
+  const recommendation = intel?.recommendations?.find((item) => item.symbol === stock.symbol);
+  const markets = intel?.kalshi?.stocks?.find((item) => item.stock?.symbol === stock.symbol)?.markets || [];
+  const calendar = intel?.calendars?.find((item) => item.symbol === stock.symbol);
+  const price = intel?.stock_signals?.prices?.find((item) => item.symbol === stock.symbol);
+  const filing = intel?.stock_signals?.filings?.find((item) => item.symbol === stock.symbol);
+  const news = intel?.stock_signals?.news?.find((item) => item.symbol === stock.symbol);
+  const officialExplorer = intel?.explorer_discovery?.tokens?.find(
+    (token) => token.routed_by_agent && token.address?.toLowerCase() === stock.address?.toLowerCase()
+  );
+  const visibleChecks = intel?.pipeline?.checks || [];
+  const rawPayload = {
+    selected: stock.symbol,
+    recommendation,
+    markets,
+    calendar,
+    price,
+    filing,
+    news,
+    pipeline: intel?.pipeline
+  };
+  const tabs = [
+    { id: "overview", label: "Overview" },
+    { id: "markets", label: "Markets", count: markets.length },
+    { id: "signals", label: "Signals" },
+    { id: "sources", label: "Sources" },
+    { id: "raw", label: "Raw" }
+  ];
+
+  return (
+    <div className="cn-card insight-card">
+      <div className="insight-tabs" role="tablist" aria-label={`${stock.symbol} research details`}>
+        {tabs.map((tab) => (
+          <button
+            key={tab.id}
+            className={activeTab === tab.id ? "active" : ""}
+            type="button"
+            role="tab"
+            aria-selected={activeTab === tab.id}
+            onClick={() => setActiveTab(tab.id)}
+          >
+            {tab.label}
+            {typeof tab.count === "number" ? <span>{tab.count}</span> : null}
+          </button>
+        ))}
+      </div>
+
+      <div className="insight-body">
+        {activeTab === "overview" ? (
+          <div className="insight-section">
+            <div className="detail-grid">
+              <DetailMetric label="Action" value={recommendation?.action || hermesOutput?.hermes_decision?.stocks?.find((item) => item.symbol === stock.symbol)?.action || "n/a"} />
+              <DetailMetric label="Confidence" value={recommendation ? `${recommendation.confidence}%` : stock.score ? `${stock.score}/100` : "n/a"} />
+              <DetailMetric label="Contract" value={shortAddress(stock.address)} />
+              <DetailMetric label="Explorer" value={recommendation?.evidence?.explorer_confirmed || officialExplorer ? "confirmed" : "not confirmed"} />
+            </div>
+            <p className="detail-copy">
+              {recommendation?.rationale || hermesOutput?.reply || "Hermes has not returned stock-specific rationale yet."}
+            </p>
+            {recommendation?.user_action ? <p className="detail-action">{recommendation.user_action}</p> : null}
+            <div className="source-links compact-links">
+              <button type="button" onClick={() => navigator.clipboard?.writeText(stock.address)}>
+                Copy contract
+              </button>
+              {officialExplorer?.token_url ? (
+                <a href={officialExplorer.token_url} target="_blank" rel="noreferrer">
+                  Explorer
+                </a>
+              ) : null}
+            </div>
+          </div>
+        ) : null}
+
+        {activeTab === "markets" ? (
+          <div className="insight-section">
+            {intel?.kalshi?.source_note ? <p className="source-note">{intel.kalshi.source_note}</p> : null}
+            <div className="market-stack">
+              {markets.length ? (
+                markets.slice(0, 4).map((market) => (
+                  <article className="market-item" key={market.ticker}>
+                    <div>
+                      <strong>{market.ticker}</strong>
+                      <p>{market.title || "Untitled Kalshi market"}</p>
+                    </div>
+                    <div className="detail-grid">
+                      <DetailMetric label="YES bid" value={market.yes_bid_dollars || "n/a"} />
+                      <DetailMetric label="YES ask" value={market.yes_ask_dollars || "n/a"} />
+                      <DetailMetric label="Liquidity" value={market.liquidity_dollars || "0"} />
+                      <DetailMetric label="Close" value={formatDate(market.close_time)} />
+                    </div>
+                  </article>
+                ))
+              ) : (
+                <div className="empty-compact">No clean Kalshi market match for {stock.symbol}.</div>
+              )}
+            </div>
+          </div>
+        ) : null}
+
+        {activeTab === "signals" ? (
+          <div className="insight-section">
+            <div className="detail-grid">
+              <DetailMetric label="Public quote" value={price?.ok ? formatMoney(price.close) : "unavailable"} />
+              <DetailMetric label="Quote date" value={price?.date || "n/a"} />
+              <DetailMetric label="Volume" value={price?.volume ? formatCompact(price.volume) : "n/a"} />
+              <DetailMetric label="SEC filing" value={filing?.latest_material?.form || recommendation?.evidence?.latest_filing?.form || "n/a"} />
+              <DetailMetric label="Earnings" value={calendar?.earnings_dates?.length ? calendar.earnings_dates.map(formatDate).join(", ") : "not returned"} />
+              <DetailMetric label="News" value={news?.article_count ? `${news.article_count} articles` : "none"} />
+            </div>
+            <div className="source-links compact-links">
+              {filing?.latest_material?.document_url ? (
+                <a href={filing.latest_material.document_url} target="_blank" rel="noreferrer">
+                  SEC filing
+                </a>
+              ) : null}
+              {(calendar?.public_links || []).slice(0, 2).map((link) => (
+                <a href={link} target="_blank" rel="noreferrer" key={link}>
+                  {hostLabel(link)}
+                </a>
+              ))}
+              {(news?.top_articles || []).slice(0, 2).map((article) => (
+                <a href={article.url} target="_blank" rel="noreferrer" key={article.url || article.title}>
+                  {article.domain || "news"}
+                </a>
+              ))}
+            </div>
+          </div>
+        ) : null}
+
+        {activeTab === "sources" ? (
+          <div className="insight-section">
+            <div className="status-strip">
+              <StatusPill label="Health" ok={backend.health} detail={backend.health ? "live" : "missing"} />
+              <StatusPill label="Intel" ok={backend.intel} detail={backend.intel ? "loaded" : "fallback"} />
+              <StatusPill label="Trade" ok={backend.trade} detail={backend.trade ? "route ready" : "not ready"} />
+              <StatusPill label="Pipeline" ok={Boolean(intel?.pipeline?.ok)} detail={intel?.pipeline?.ok ? "clean" : "degraded"} />
+            </div>
+            <div className="pipeline-list">
+              {visibleChecks.length ? (
+                visibleChecks.map((check) => (
+                  <div className="pipeline-item" key={check.name}>
+                    <div>
+                      <strong>{check.name?.replaceAll("_", " ")}</strong>
+                      <span>{check.source}</span>
+                    </div>
+                    <b className={check.ok ? "ok" : "degraded"}>{check.ok ? `${check.records} records` : check.error || "unavailable"}</b>
+                  </div>
+                ))
+              ) : (
+                <div className="empty-compact">Source checks will appear after Hermes output loads.</div>
+              )}
+            </div>
+          </div>
+        ) : null}
+
+        {activeTab === "raw" ? (
+          <div className="insight-section">
+            <details className="raw-details" open>
+              <summary>Selected payload</summary>
+              <pre>{JSON.stringify(rawPayload, null, 2)}</pre>
+            </details>
+          </div>
+        ) : null}
+      </div>
     </div>
   );
 }
@@ -262,6 +512,8 @@ function App() {
   const [hermesOutput, setHermesOutput] = React.useState(null);
   const [charts, setCharts] = React.useState({});
   const [chartStatus, setChartStatus] = React.useState("idle");
+  const [quoteResult, setQuoteResult] = React.useState(null);
+  const [activeInsightTab, setActiveInsightTab] = React.useState("overview");
 
   const stock = stocks.find((item) => item.symbol === selected);
   const payToken = payTokens.find((token) => token.symbol === payTokenSymbol) || payTokens[0];
@@ -366,6 +618,7 @@ function App() {
       return;
     }
     setRoutePreview(`${side === "sell" ? stock.symbol : payToken.symbol} -> ${side === "sell" ? payToken.symbol : stock.symbol}. Robinhood Chain ${side} quote will use exact contracts on chain 46630.`);
+    setQuoteResult(null);
   }, [stock, payToken, side]);
 
   function routePayload() {
@@ -402,6 +655,7 @@ function App() {
       return;
     }
     setRoutePreview("Preparing quote...");
+    setQuoteResult(null);
     try {
       const res = await fetch("/api/robinhood/trade", {
         method: "POST",
@@ -413,7 +667,8 @@ function App() {
         setRoutePreview(`Quote request failed with status ${res.status}`);
         return;
       }
-      setRoutePreview(JSON.stringify(payload));
+      setQuoteResult(payload);
+      setRoutePreview("Quote prepared. Review the receipt before signing in your wallet.");
     } catch (error) {
       setRoutePreview(`Quote request failed: ${error.message}`);
     }
@@ -523,6 +778,7 @@ function App() {
                   <span>Route</span>
                   <p>{routePreview}</p>
                 </div>
+                <QuoteReceipt quote={quoteResult} />
               </div>
 
               <button className="swap-submit" type="submit">
@@ -572,6 +828,13 @@ function App() {
                   <ul className="research-list">{(stock.bullets || []).map((item) => <li key={item}>{item}</li>)}</ul>
                 </div>
               </div>
+              <ResearchTabs
+                stock={stock}
+                hermesOutput={hermesOutput}
+                activeTab={activeInsightTab}
+                setActiveTab={setActiveInsightTab}
+                backend={backend}
+              />
             </div>
           </section>
         )}
