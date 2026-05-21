@@ -1,0 +1,33 @@
+import { jsonResponse } from "@/lib/env";
+import { robinhoodChainId, robinhoodExplorer, robinhoodRpcUrl } from "@/lib/robinhood";
+
+export const dynamic = "force-dynamic";
+
+export async function GET() {
+  const openrouterConfigured = Boolean(process.env.OPENROUTER_API_KEY?.trim());
+  const nuvolariConfigured = Boolean(process.env.NUVOLARI_API_KEY?.trim() || process.env.NUVOLARI_SECRET_API_KEY?.trim());
+  const rpcConfigured = Boolean(robinhoodRpcUrl());
+
+  return jsonResponse({
+    ok: true,
+    runtime: "nextjs",
+    model: process.env.OPENROUTER_MODEL || "deepseek/deepseek-v4-flash",
+    openrouter_configured: openrouterConfigured,
+    nuvolari_configured: nuvolariConfigured,
+    robinhood_chain: {
+      chainId: robinhoodChainId(),
+      explorer: robinhoodExplorer(),
+      rpc_configured: rpcConfigured,
+      stock_trade_tool: "/api/robinhood/trade"
+    },
+    data_pipeline: {
+      intel_endpoint: "/api/robinhood/intel",
+      chat_ingestion: "/api/chat",
+      agent_context: "robinhood_chain_tokens+kalshi_public_markets+public_event_calendars+explorer_discovery+recommendations"
+    },
+    kalshi: {
+      base_url: process.env.KALSHI_API_BASE_URL || "https://external-api.kalshi.com/trade-api/v2",
+      public_market_data: true
+    }
+  });
+}
