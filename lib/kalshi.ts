@@ -289,12 +289,12 @@ function annotateMarketWithSeries(market: KalshiMarket, series: KalshiSeries): K
 }
 
 function targetedKalshiPages(): number {
-  const configured = Number(env("KALSHI_TARGETED_MARKET_PAGES", "1"));
-  return Number.isFinite(configured) ? Math.max(1, Math.min(Math.trunc(configured), 40)) : 1;
+  const configured = Number(env("KALSHI_TARGETED_MARKET_PAGES", "0"));
+  return Number.isFinite(configured) ? Math.max(0, Math.min(Math.trunc(configured), 40)) : 0;
 }
 
 function shouldScanSeries(): boolean {
-  return env("KALSHI_USE_SERIES_SCAN", "") === "true";
+  return env("KALSHI_USE_SERIES_SCAN", "true") !== "false";
 }
 
 async function mapWithConcurrency<T, R>(
