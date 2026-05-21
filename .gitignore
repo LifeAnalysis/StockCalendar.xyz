@@ -9,6 +9,7 @@ __pycache__/
 .mypy_cache/
 
 node_modules/
+.next/
 package-lock.json
 npm-debug.log*
 

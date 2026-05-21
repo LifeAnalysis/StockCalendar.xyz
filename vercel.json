@@ -1,13 +1,3 @@
 {
-  "version": 2,
-  "routes": [
-    {
-      "src": "/api/(.*)",
-      "dest": "/api/index.py"
-    },
-    {
-      "src": "/(.*)",
-      "dest": "/public/index.html"
-    }
-  ]
+  "framework": "nextjs"
 }

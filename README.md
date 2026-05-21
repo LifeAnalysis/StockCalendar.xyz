@@ -1,76 +1,60 @@
-# Nuvolari Hermes Agent
+# Hermes Robinhood Chain
 
-Compact Vercel/OpenRouter agent for Nuvolari execution research and AImeme memecoin scouting.
+Next.js command center for Robinhood Chain stock tokens, Kalshi market context, public event links, and Nuvolari/Arqsy quote preparation.
 
-This repo is intentionally small. It keeps only the serverless API, browser command center, AImeme knowledge base, cron workflow, and deployment config needed for Gary's autonomous trading research stack.
+The app does not sign transactions. It prepares atomic stock buy/sell/rotate quotes only after exact token contracts, wallet EOA, and integer base-unit amount are present.
 
-## What It Does
-
-- Routes chat requests through OpenRouter with tool calls handled in `api/index.py`.
-- Calls Nuvolari read/quote endpoints for yields, swaps, buys, execution quotes, and signed execution submission.
-- Runs AImeme discovery across GeckoTerminal/CoinGecko, DexScreener, Rugcheck, and GoPlus.
-- Shows an AImeme portfolio view for watch, buy-review, trim, and sell decisions.
-- Generates AgentCash/Nansen paid-enrichment commands without spending x402 funds from Vercel.
-- Exposes `/api/cron/aimeme` for compact scheduled decisions and optional webhook delivery.
-- Serves a simple browser command center from `public/index.html`.
-
-The agent does not sign transactions. Final swaps, buys, yield entries, or execution submissions still require exact token/vault addresses, numeric chain IDs, wallet EOA, integer base-unit amounts, and user-produced signatures.
-
-## Repo Layout
+## Stack
 
 ```text
-api/index.py                         Serverless API and tool-call runtime
-public/index.html                    Browser command center
-knowledge/aimeme/                    AImeme doctrine, workflow, and AutoWiki references
-.github/workflows/hermes-cron.yml    15-minute AImeme cron caller
-vercel.json                          Vercel routing
-.env.example                         Required deployment variables
+app/page.tsx                       Frontend command center
+app/api/health/route.ts            Runtime readiness
+app/api/robinhood/status/route.ts  Robinhood Chain RPC status
+app/api/robinhood/stocks/route.ts  Stock token dictionary
+app/api/robinhood/intel/route.ts   Robinhood + Kalshi + calendar aggregate
+app/api/robinhood/trade/route.ts   Atomic stock quote preparation
+lib/robinhood.ts                   Official stock/payment token dictionary and trade rail
+lib/kalshi.ts                      Kalshi public market fetch + matcher
+lib/calendar.ts                    Public earnings/event lookup
 ```
 
 ## Environment
 
-Copy `.env.example` into Vercel project env vars or a local `.env` when testing.
-
 ```bash
-OPENROUTER_API_KEY=...
+OPENROUTER_API_KEY=
 OPENROUTER_MODEL=deepseek/deepseek-v4-flash
-OPENROUTER_MAX_TOKENS=8192
-OPENROUTER_HISTORY_TURNS=24
-OPENROUTER_TRANSFORMS=middle-out
+
+KALSHI_API_BASE_URL=https://external-api.kalshi.com/trade-api/v2
+KALSHI_MARKET_CACHE_SECONDS=180
+KALSHI_MAX_MARKET_PAGES=12
 
 NUVOLARI_API_BASE_URL=https://api.staging.nuvolari.ai
-NUVOLARI_API_KEY=...
-NUVOLARI_SECRET_API_KEY=...
+NUVOLARI_API_KEY=
+NUVOLARI_SECRET_API_KEY=
+NUVOLARI_EXECUTION_QUOTE_PATH=/v1/execution/quote
+NUVOLARI_EXECUTION_EXECUTE_PATH=/v1/execution/execute
 
-COINGECKO_API_KEY=
-AIMEME_TRACKED_TOKENS='[{"symbol":"TOKEN","chain":"base","address":"0x...","entry_price":"0.001"}]'
-AIMEME_PORTFOLIO_WALLET=
-AIMEME_DECISION_WEBHOOK_URL=
-AIMEME_CRON_SECRET=
+ROBINHOOD_CHAIN_RPC_URL=https://robinhood-testnet.g.alchemy.com/v2/...
+ROBINHOOD_CHAIN_ID=46630
+ROBINHOOD_CHAIN_EXPLORER_URL=https://explorer.testnet.chain.robinhood.com/
+ROBINHOOD_STOCK_PROVIDER=nuvolari
+
+ARQSY_API_BASE_URL=
+ARQSY_API_KEY=
+ARQSY_SECRET_API_KEY=
+ARQSY_STOCK_TRADE_PATH=/v1/stocks/trade
 ```
 
-## API
+## Source Of Truth
 
-- `GET /` serves the command center.
-- `GET /api/health` reports configured keys, Nuvolari path readiness, model, and AImeme knowledge status.
-- `POST /api/chat` sends a user message through OpenRouter and executes approved local tools.
-- `GET /api/portfolio?scan=1&max_candidates=3` returns wallet status, tracked positions, watchlist candidates, and watch/buy/trim/sell buckets.
-- `GET /api/cron/aimeme?max_candidates=6&chain=base` runs a compact AImeme scan cycle.
-- `GET /api/context7?q=...` fetches Nuvolari Context7 docs text.
-- `GET /api/docs/<topic>?ask=...` proxies Nuvolari docs lookup topics such as `swap`, `yield`, `liquidity`, `agents`, and `insights`.
+Robinhood stock tokens are currently the official testnet contracts from `https://docs.robinhood.com/chain/contracts/`: `TSLA`, `AMZN`, `PLTR`, `NFLX`, and `AMD`, plus payment tokens `WETH` and `USDG`.
 
-## Cron
+Kalshi market data uses the public Trade API. Calendar data uses public finance endpoints where available and always returns fallback public links for manual inspection.
 
-GitHub Actions calls `/api/cron/aimeme` every 15 minutes. Set `HERMES_AGENT_BASE_URL` as a repository variable or secret, for example:
+## Development
 
-```text
-https://your-vercel-app.vercel.app
+```bash
+npm install
+npm run dev
+npm run build
 ```
-
-If `AIMEME_CRON_SECRET` is set in Vercel, add the same value as a GitHub Actions secret so the workflow can send `Authorization: Bearer ...`.
-
-## Deployment
-
-Deploy this repo to Vercel with the default project root. `vercel.json` routes `/api/*` to `api/index.py` and all other requests to `public/index.html`.
-
-No Node install is required. The Python function uses the standard library only.
