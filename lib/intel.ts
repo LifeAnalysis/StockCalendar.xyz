@@ -326,25 +326,22 @@ function buildStockRecommendations(
     );
     const confidence = Math.min(
       95,
-      35 +
-        (topMarket ? Math.min(topMarket.score * 5, 30) : 0) +
+      (topMarket ? Math.min(topMarket.score * 5, 45) : 0) +
         (calendar?.ok ? 15 : 0) +
-        (price?.ok ? 10 : 0) +
-        (filing?.ok && filing.latest_material ? 10 : 0) +
-        Math.min((news?.article_count || 0) * 2, 8) +
-        (explorerConfirmed ? 10 : 0) +
-        Math.min((marketRow?.match_count || 0) * 2, 5)
+        (price?.ok ? 15 : 0) +
+        (filing?.ok && filing.latest_material ? 15 : 0) +
+        Math.min((news?.article_count || 0) * 2, 10) +
+        Math.min((marketRow?.match_count || 0) * 2, 10)
     );
     const signalCount = [
       topMarket,
       calendar?.ok,
       price?.ok,
       filing?.ok && filing.latest_material,
-      (news?.article_count || 0) > 0,
-      explorerConfirmed
+      (news?.article_count || 0) > 0
     ].filter(Boolean).length;
     const recommendation: StockRecommendation["recommendation"] =
-      topMarket && confidence >= 80
+      topMarket && stock.address && confidence >= 75
         ? "prepare_quote"
         : signalCount >= 2
           ? "watch"

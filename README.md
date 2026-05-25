@@ -25,9 +25,9 @@ The main app is a two-column stock desk:
 
 ### Hermes Panels
 
-- **Hermes output:** model or deterministic fallback summary for the selected stock.
+- **Hermes output:** OpenRouter final vote plus user-facing textual output, with deterministic fallback only when the model is unavailable.
 - **Why this route?:** selected source/target token route, wallet/network/quote state, and key evidence chips.
-- **Confidence decomposition:** point-by-point confidence contribution from route readiness, Kalshi, earnings, quote data, SEC, news, and explorer checks.
+- **Confidence decomposition:** point-by-point confidence contribution from Kalshi market quality, earnings, quote data, SEC, news, and market breadth, with route/explorer shown separately as readiness checks.
 - **Reasoning graph:** visual evidence graph linking route, public sources, market context, and Hermes decision.
 - **Earnings backtest:** previous earnings events with post-event move, news count, Kalshi context, and concise analysis.
 - **Prediction-market overlay:** matched Kalshi markets, YES/NO bid/ask, liquidity, close time, and match quality.

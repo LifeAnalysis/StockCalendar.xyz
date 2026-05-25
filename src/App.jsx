@@ -215,10 +215,33 @@ function splitReasoningText(value) {
   const text = String(value || "").trim();
   if (!text) return [];
   return text
-    .split(/(?:;\s+|\.\s+| · )/)
+    .split(/(?:\n+|;\s+|\.\s+| · )/)
     .map((part) => part.trim().replace(/\.$/, ""))
     .filter(Boolean)
     .slice(0, 5);
+}
+
+function cleanHermesText(value) {
+  return String(value || "")
+    .replace(/\*\*/g, "")
+    .replace(/^\s*[-|]\s*/, "")
+    .trim();
+}
+
+function parseHermesReplySections(reply) {
+  const text = String(reply || "").trim();
+  if (!text) return [];
+  const matches = [...text.matchAll(/\*\*(Checked|Final vote|Why|Next)\*\*|(?:^|\n|\s)(Checked|Final vote|Why|Next)\s*:/gi)];
+  if (!matches.length) return [{ title: "Output", body: text }];
+  return matches.map((match, index) => {
+    const title = match[1] || match[2];
+    const start = (match.index || 0) + match[0].length;
+    const end = matches[index + 1]?.index ?? text.length;
+    return {
+      title,
+      body: text.slice(start, end).trim()
+    };
+  });
 }
 
 function shortenAddress(value) {
@@ -466,6 +489,7 @@ function decorateStock(item, index, recommendation, price) {
 function HermesOutputBar({ stock, hermesOutput, loading, progress }) {
   const score = Math.max(0, Math.min(stock.score || 0, 100));
   const decision = hermesOutput?.hermes_decision?.stocks?.find((item) => item.symbol === stock.symbol);
+  const llmStockVote = hermesOutput?.llm_vote?.stocks?.find((item) => item.symbol === stock.symbol);
   const [loadingWordIndex, setLoadingWordIndex] = React.useState(0);
 
   React.useEffect(() => {
@@ -479,11 +503,30 @@ function HermesOutputBar({ stock, hermesOutput, loading, progress }) {
   const fallbackStance = decision?.action || (score >= 64 ? "WATCH" : "NO_BUY");
   const stance = loading ? HERMES_LOADING_WORDS[loadingWordIndex] : fallbackStance;
   const displayScore = loading ? Math.max(4, Math.min(progress?.percent || 0, 99)) : decision?.confidence || score;
+  const stockReply = hermesOutput?.stock_replies?.[stock.symbol];
+  const stockReplyLines = stockReply
+    ? String(stockReply)
+        .split("\n")
+        .map((line) => line.trim())
+        .filter((line) => line && !line.startsWith(`${stock.symbol}:`) && !line.startsWith(`${stock.symbol} -`))
+    : [];
+  const stockEvidenceRows = stockReplyLines
+    .filter((line) => !line.startsWith("Next:"))
+    .map((line) => {
+      const splitAt = line.indexOf(":");
+      return splitAt > 0
+        ? { label: line.slice(0, splitAt), value: line.slice(splitAt + 1).trim() }
+        : { label: "Note", value: line };
+    });
+  const stockReplyReason = stockEvidenceRows.map((row) => `${row.label}: ${row.value}`).join("\n");
   const reasoning =
+    stockReplyReason ||
+    llmStockVote?.reason ||
     decision?.reason ||
-    hermesOutput?.reply ||
     (loading ? "Hermes is collecting market, filing, quote, and route evidence before returning a decision." : `${stock.symbol} selected. Contract is ready for Robinhood testnet quote prep.`);
   const reasoningPoints = splitReasoningText(reasoning);
+  const voteSource = hermesOutput?.vote_source === "openrouter" && llmStockVote ? "OpenRouter vote" : "Deterministic vote";
+  const nextStep = llmStockVote?.user_action || decision?.user_action;
   return (
     <div className="cn-card score-card">
       <div className="cn-card-content">
@@ -552,10 +595,28 @@ function HermesOutputBar({ stock, hermesOutput, loading, progress }) {
             </div>
           </div>
           <div className="score-reasoning">
-            <span>{loading ? "Hermes model running" : "Reasoning"}</span>
-            <div className="reasoning-point-list">
-              {reasoningPoints.length ? reasoningPoints.map((point) => <p key={point}>{point}</p>) : <p>{reasoning}</p>}
+            <div className="score-reasoning-head">
+              <span>{loading ? "Hermes model running" : `${stock.symbol} final vote`}</span>
+              {!loading ? <small>{voteSource}</small> : null}
             </div>
+            <div className="reasoning-point-list">
+              {stockEvidenceRows.length
+                ? stockEvidenceRows.map((row) => (
+                    <div className={`stock-evidence-row ${row.label.toLowerCase() === "take" ? "stock-evidence-take" : ""}`} key={`${row.label}-${row.value}`}>
+                      <span>{row.label}</span>
+                      <p>{row.value}</p>
+                    </div>
+                  ))
+                : reasoningPoints.length
+                  ? reasoningPoints.map((point) => <p key={point}>{point}</p>)
+                  : <p>{reasoning}</p>}
+            </div>
+            {!loading && nextStep ? (
+              <div className="stock-next-step">
+                <span>Next</span>
+                <p>{nextStep}</p>
+              </div>
+            ) : null}
           </div>
         </div>
         {loading ? (
@@ -573,6 +634,57 @@ function HermesOutputBar({ stock, hermesOutput, loading, progress }) {
         ) : null}
       </div>
     </div>
+  );
+}
+
+function HermesFinalOutput({ hermesOutput, loading }) {
+  const reply = hermesOutput?.reply_source === "openrouter" ? hermesOutput?.reply : "";
+  const sections = parseHermesReplySections(reply);
+  const votes = hermesOutput?.llm_vote?.stocks || [];
+  if (loading || !reply || !sections.length) return null;
+
+  return (
+    <section className="cn-card hermes-final-output" aria-label="Hermes final output">
+      <div className="cn-card-content">
+        <div className="hermes-final-header">
+          <div>
+            <span>Hermes output</span>
+            <h3>OpenRouter final vote</h3>
+          </div>
+          <span className="hermes-source-pill">LLM vote</span>
+        </div>
+        <div className="hermes-final-sections">
+          {sections.map((section) => {
+            const title = cleanHermesText(section.title);
+            const lines = section.body
+              .split("\n")
+              .map(cleanHermesText)
+              .filter((line) => line && !/^\|[-\s|]+\|?$/.test(line) && !/^stock\s*\|/i.test(line));
+            const showVotes = title.toLowerCase() === "final vote" && votes.length;
+            return (
+              <article key={title} className="hermes-final-section">
+                <h4>{title}</h4>
+                {showVotes ? (
+                  <div className="hermes-vote-grid">
+                    {votes.map((vote) => (
+                      <div key={vote.symbol} className="hermes-vote-row">
+                        <strong>{vote.symbol}</strong>
+                        <span>{vote.action}</span>
+                        <small>{vote.confidence}/100</small>
+                      </div>
+                    ))}
+                  </div>
+                ) : (
+                  <div className="hermes-final-copy">
+                    {lines.map((line) => <p key={line}>{line}</p>)}
+                  </div>
+                )}
+              </article>
+            );
+          })}
+        </div>
+      </div>
+    </section>
   );
 }
 
@@ -917,19 +1029,19 @@ function ConfidenceDecomposition({ stock, hermesOutput }) {
   const [expandedSegment, setExpandedSegment] = React.useState(null);
   const { decision, calendar, price, filing, news, kalshi, explorerConfirmed } = getHermesContext(stock, hermesOutput);
   const topMarket = kalshi?.markets?.[0];
-  const baseValue = stock?.address ? 35 : 0;
-  const marketValue = topMarket ? Math.min(Number(topMarket.score || 0) * 5, 30) : 0;
-  const signalValue =
-    (calendar?.ok ? 15 : 0) +
-    (price?.ok ? 10 : 0) +
-    (filing?.ok && filing.latest_material ? 10 : 0) +
-    Math.min((news?.article_count || 0) * 2, 8);
-  const explorerValue = explorerConfirmed ? 10 : 0;
+  const marketValue = topMarket ? Math.min(Number(topMarket.score || 0) * 5, 45) : 0;
+  const calendarValue = calendar?.ok ? 15 : 0;
+  const quoteValue = price?.ok ? 15 : 0;
+  const filingValue = filing?.ok && filing.latest_material ? 15 : 0;
+  const newsValue = Math.min((news?.article_count || 0) * 2, 10);
+  const breadthValue = Math.min((kalshi?.match_count || 0) * 2, 10);
   const rawSegments = [
-    { label: "Route", value: baseValue, note: stock?.address ? "Official Robinhood Chain stock token contract exists." : "No official stock token route is available.", color: "#a6979c" },
     { label: "Market", value: marketValue, note: topMarket?.title || topMarket?.ticker || "No clean Kalshi market match.", color: "#407076" },
-    { label: "Signals", value: signalValue, note: [price?.date ? `Quote date ${price.date}` : null, filing?.latest_material?.form ? `SEC ${filing.latest_material.form}` : null, news?.article_count ? `${news.article_count} news item(s)` : null].filter(Boolean).join(" · ") || "Public feeds did not add fresh signal.", color: "#ccff00" },
-    { label: "Explorer", value: explorerValue, note: explorerConfirmed ? "Contract found in Robinhood Chain explorer discovery." : "Explorer confirmation not found yet.", color: "#04151f" }
+    { label: "Calendar", value: calendarValue, note: calendar?.ok ? "Calendar feed returned earnings context." : "Calendar feed did not return a clean event.", color: "#a6979c" },
+    { label: "Quote", value: quoteValue, note: price?.ok ? `Quote date ${price.date || "unknown"}` : "No clean latest quote.", color: "#ccff00" },
+    { label: "SEC", value: filingValue, note: filing?.latest_material?.form ? `Latest filing ${filing.latest_material.form}` : "No recent SEC filing signal.", color: "#6b7c85" },
+    { label: "News", value: newsValue, note: news?.article_count ? `${news.article_count} recent news item(s)` : "No clean news signal.", color: "#d86c3f" },
+    { label: "Breadth", value: breadthValue, note: kalshi?.match_count ? `${kalshi.match_count} Kalshi market match(es)` : "No extra market breadth.", color: "#04151f" }
   ];
   const contributionTotal = Math.max(1, rawSegments.reduce((sum, segment) => sum + segment.value, 0));
   const segments = rawSegments.map((segment) => ({
@@ -939,6 +1051,10 @@ function ConfidenceDecomposition({ stock, hermesOutput }) {
   const selectedSegment = segments.find((segment) => segment.label === expandedSegment);
   const total = decision?.confidence ?? Math.min(95, contributionTotal);
   const summaryFactors = segments.map((segment) => ({ label: segment.label, note: segment.note }));
+  const readinessFactors = [
+    { label: "Route", note: stock?.address ? "Official Robinhood Chain stock token contract exists." : "No official stock token route is available." },
+    { label: "Explorer", note: explorerConfirmed ? "Contract found in Robinhood Chain explorer discovery." : "Explorer confirmation not found yet." }
+  ];
 
   return (
     <div data-slot="card" data-size="default" className="cn-card confidence-panel confidence-breakdown-card">
@@ -1000,8 +1116,17 @@ function ConfidenceDecomposition({ stock, hermesOutput }) {
               </article>
             ))}
           </div>
+          <span className="font-medium">Route readiness</span>
+          <div className="confidence-summary-grid">
+            {readinessFactors.map((factor) => (
+              <article key={factor.label}>
+                <span>{factor.label}</span>
+                <p>{factor.note}</p>
+              </article>
+            ))}
+          </div>
           <small className="confidence-formula-note">
-            Formula: 35 route + up to 30 Kalshi market quality + 15 calendar + 10 latest quote + 10 SEC filing + up to 8 news + 10 explorer, capped at 95.
+            Formula: up to 45 Kalshi market quality + 15 calendar + 15 latest quote + 15 SEC filing + up to 10 news + up to 10 Kalshi breadth, capped at 95. Route and explorer checks are readiness, not confidence.
           </small>
         </div>
       </div>
@@ -1878,6 +2003,7 @@ function App() {
                 selectedRange={chartRange}
               />
               <HermesOutputBar stock={stock} hermesOutput={hermesOutput} loading={hermesLoading} progress={hermesProgress} />
+              <HermesFinalOutput hermesOutput={hermesOutput} loading={hermesLoading} />
               <ConfidenceDecomposition stock={stock} hermesOutput={hermesOutput} />
               <HermesReasoningGraph stock={stock} hermesOutput={hermesOutput} loading={hermesLoading} />
               <EarningsBacktestTable stock={stock} backtest={backtests[stock.symbol]} loading={backtestStatus === "loading" && !backtests[stock.symbol]} />
