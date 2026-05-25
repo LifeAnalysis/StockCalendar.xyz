@@ -764,7 +764,7 @@ function EarningsBacktestTable({ stock, backtest, loading }) {
       <button className="backtest-toggle" type="button" aria-expanded={expanded} onClick={() => setExpanded((current) => !current)}>
         <div>
           <div className="menu-title-row">
-            <span className="menu-title-square-icon backtest-title-icon" aria-hidden="true"></span>
+            <MotionAsset src="/media/icons/hermes-output-orb.mp4" webmSrc="/media/icons/hermes-output-orb.webm" className="menu-title-motion" />
             <h3>Hermes Backtest</h3>
           </div>
           <span>{loading ? "Running" : rows.length ? "Previous 3 earnings" : "No rows yet"}</span>
@@ -1071,7 +1071,7 @@ function DataProvenanceView({ hermesOutput }) {
       <div className="module-head">
         <div>
           <div className="menu-title-row">
-            <span className="menu-title-square-icon data-feed-title-icon" aria-hidden="true"></span>
+            <MotionAsset src="/media/icons/hermes-thinking.mp4" webmSrc="/media/icons/hermes-thinking.webm" className="menu-title-motion" />
             <h3>Data Feed</h3>
           </div>
         </div>

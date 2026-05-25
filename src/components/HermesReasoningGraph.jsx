@@ -30,8 +30,8 @@ function kalshiMarketUrl(market) {
 
 function nodeDimensions(node) {
   const label = String(node.label || "");
-  const width = Math.max(118, Math.min(190, label.length * 8 + 34));
-  const height = node.type === "decision" ? 70 : label.length > 22 ? 64 : 54;
+  const width = Math.max(128, Math.min(190, label.length * 7 + 34));
+  const height = node.type === "decision" ? 66 : label.length > 22 ? 60 : 52;
   return { width, height };
 }
 
@@ -312,11 +312,11 @@ export function HermesReasoningGraph({ stock, hermesOutput, loading }) {
             height: "data(height)",
             "min-zoomed-font-size": 6,
             "overlay-opacity": 0,
-            shape: "round-rectangle",
+            shape: "rectangle",
             "text-halign": "center",
             "text-margin-x": 0,
             "text-margin-y": 0,
-            "text-max-width": 150,
+            "text-max-width": 170,
             "text-valign": "center",
             "text-wrap": "wrap",
             width: "data(width)"
@@ -363,25 +363,22 @@ export function HermesReasoningGraph({ stock, hermesOutput, loading }) {
         }
       ],
       layout: {
-        name: "concentric",
+        name: "grid",
         animate: false,
         avoidOverlap: true,
+        avoidOverlapPadding: 24,
         fit: true,
-        padding: 50,
-        minNodeSpacing: 38,
-        concentric: (node) => {
-          if (node.id() === "decision") return 3;
-          if (node.data("type") === "route" || node.data("type") === "signal") return 2;
-          return 1;
-        },
-        levelWidth: () => 1
+        padding: 44,
+        condense: true,
+        rows: Math.ceil(Math.sqrt(graph.nodes.length))
       }
     });
 
     const centerGraph = () => {
       cy.resize();
-      cy.fit(cy.elements(), 56);
-      cy.center();
+      if (cy.elements().length) {
+        cy.fit(cy.elements(), 48);
+      }
     };
     const initialNode = cy.getElementById(graph.selected?.id || "decision");
     if (initialNode.length) initialNode.select();
@@ -416,8 +413,7 @@ export function HermesReasoningGraph({ stock, hermesOutput, loading }) {
 
   const resetGraph = React.useCallback(() => {
     if (!cyRef.current) return;
-    cyRef.current.fit(cyRef.current.elements(), 56);
-    cyRef.current.center();
+    cyRef.current.fit(cyRef.current.elements(), 48);
   }, []);
 
   return (
