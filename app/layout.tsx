@@ -4,7 +4,7 @@ import { headers } from "next/headers";
 import Providers from "./providers";
 
 export const metadata: Metadata = {
-  title: "Hermes Robinhood Chain",
+  title: "stockscalendar",
   description: "Kalshi and market-intelligence command center for Robinhood Chain stock tokens",
   icons: {
     icon: [{ url: "/media/icons/hermes-thinking.webm", type: "video/webm" }]

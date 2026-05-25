@@ -22,10 +22,10 @@ createAppKit({
   networks,
   defaultNetwork: robinhoodChain,
   metadata: {
-    name: "Hermes Robinhood Chain",
+    name: "stockscalendar",
     description: "Robinhood Chain stock-token swap command center",
     url: process.env.NEXT_PUBLIC_SITE_URL || "https://hermes-robinhood-chain.vercel.app",
-    icons: ["/logos/tesla.svg"]
+    icons: ["/media/icons/hermes-thinking.webm"]
   },
   features: {
     analytics: isReownConfigured,
