@@ -393,19 +393,19 @@ function buildStockRecommendations(
         }
       : undefined;
     const support = [
-      priceSnapshot?.close ? `public quote close ${priceSnapshot.close}${priceSnapshot.date ? ` on ${priceSnapshot.date}` : ""}` : "",
-      latestFiling ? `latest SEC material filing ${latestFiling.form}${latestFiling.filing_date ? ` on ${latestFiling.filing_date}` : ""}` : "",
+      priceSnapshot?.close ? `public quote close $${priceSnapshot.close}${priceSnapshot.date ? ` on ${priceSnapshot.date}` : ""}${priceSnapshot.volume ? ` with ${priceSnapshot.volume.toLocaleString("en-US")} volume` : ""}` : "",
+      latestFiling ? `SEC ${latestFiling.form}${latestFiling.filing_date ? ` filed ${latestFiling.filing_date}` : ""}` : "",
       news?.article_count ? `${news.article_count} recent GDELT article(s)` : "",
-      marketPricing ? marketPricing.spread_note : ""
+      marketPricing ? `Kalshi ${marketPricing.spread_note}` : ""
     ].filter(Boolean);
     const rationale =
       action === "CONFIG_NEEDED"
         ? "Required market or event sources are unavailable, so Hermes cannot form a clean Robinhood Chain stock-token recommendation."
         : recommendation === "prepare_quote"
-        ? `Official Robinhood Chain stock route is available and supporting public evidence is usable. ${support.join("; ")}`.trim()
+        ? `Official Robinhood Chain route is confirmed. Supporting evidence: ${support.join("; ")}. Quote prep is allowed only after the wallet owner accepts the evidence and signing step.`.trim()
         : recommendation === "watch"
-          ? `Official Robinhood Chain stock route is available, but supporting evidence is not strong enough for a buy setup. ${support.join("; ")}`.trim()
-          : "Official Robinhood Chain stock route is available, but supporting public market, filing, news, calendar, and Kalshi context is too thin right now.";
+          ? `Official Robinhood Chain route is ready, but this stays WATCH because the evidence is not strong enough for a buy setup. Supporting evidence: ${support.join("; ") || "no clean public signal returned"}.`.trim()
+          : "Official Robinhood Chain route is ready, but public market, filing, news, calendar, and Kalshi context is too thin for a buy setup right now.";
     const userAction =
       action === "CONFIG_NEEDED"
         ? "Fix the missing/degraded data source before presenting this as a buy recommendation."

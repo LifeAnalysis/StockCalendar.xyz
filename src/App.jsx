@@ -1874,6 +1874,10 @@ function App() {
           <SparklesIcon />
           Built using Hermes, custom model, Robinhood Chain, and Kalshi data feed
         </span>
+        <a href="https://twitter.com/kuerax" target="_blank" rel="noreferrer">
+          <SparklesIcon />
+          <span>@kuerax on Twitter</span>
+        </a>
       </footer>
       <TokenPicker
         open={tokenPicker === "stock"}
