@@ -1,0 +1,15 @@
+import { NextResponse } from "next/server";
+import { getMarketSnapshot } from "@/lib/market";
+
+export const dynamic = "force-dynamic";
+
+export async function GET() {
+  const snapshot = await getMarketSnapshot();
+  // 15s fresh, 30s SWR — keeps displayed price within ~15s of DexScreener
+  // without hammering the upstream on every refresh.
+  return NextResponse.json(snapshot, {
+    headers: {
+      "Cache-Control": "public, s-maxage=15, stale-while-revalidate=30",
+    },
+  });
+}

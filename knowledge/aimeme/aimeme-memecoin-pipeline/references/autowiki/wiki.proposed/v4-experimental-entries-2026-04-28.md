@@ -1,0 +1,1 @@
+<!-- PROPOSE DELETE: R4 violation — dated trade-narrative for HENRY/Dunald specifics; durable lessons live in strict-prefilter-gauntlet.md and vc-backed-dormant-revival-pattern.md. Content migrated to outputs/2026-04-28-migrated-v4-experimental-entries-2026-04-28.md. -->

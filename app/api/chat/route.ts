@@ -1,6 +1,5 @@
 import { jsonResponse } from "@/lib/env";
 import { buildHermesOutput } from "@/lib/hermes-output";
-import { prepareStockTrade } from "@/lib/robinhood";
 
 export const dynamic = "force-dynamic";
 
@@ -37,14 +36,6 @@ export async function POST(request: Request) {
   }
 
   return jsonResponse({
-    reply: "Next.js Hermes is live. Ask for Robinhood stocks, Kalshi stock markets, event calendars, or an atomic stock trade quote.",
-    example: await prepareStockTrade({
-      action: "buy",
-      source_asset: "",
-      target_asset: "",
-      amount: "",
-      wallet_address: "",
-      provider: "auto"
-    })
+    reply: "Next.js Hermes is live. Ask for Robinhood stocks, Kalshi stock markets, event calendars, SEC filings, news, or Hermes stock research."
   });
 }

@@ -1,8 +1,8 @@
 # Hermes Robinhood Chain
 
-Next.js command center for Robinhood Chain stock tokens, Kalshi market context, public event links, and Nuvolari quote preparation.
+Next.js command center for Robinhood Chain stock tokens, Kalshi market context, public event links, SEC/news signals, and Hermes research.
 
-The app does not sign transactions. It prepares atomic stock buy/sell/rotate quotes only after exact token contracts, wallet EOA, and integer base-unit amount are present.
+The app does not sign transactions. Quote preparation is disabled until a provider with Robinhood Chain stock-token support is configured.
 
 ## Stack
 
@@ -12,9 +12,9 @@ app/api/health/route.ts            Runtime readiness
 app/api/robinhood/status/route.ts  Robinhood Chain RPC status
 app/api/robinhood/stocks/route.ts  Stock token dictionary
 app/api/robinhood/intel/route.ts   Robinhood + Kalshi + calendar aggregate
-app/api/robinhood/trade/route.ts   Atomic stock quote preparation
+app/api/robinhood/trade/route.ts   Disabled quote endpoint until a supported provider exists
 app/api/chat/route.ts              Hermes chat fed by the same normalized intel payload
-lib/robinhood.ts                   Official stock/payment token dictionary and trade rail
+lib/robinhood.ts                   Official stock/payment token dictionary and chain helpers
 lib/kalshi.ts                      Kalshi public market fetch + matcher
 lib/calendar.ts                    Public earnings/event lookup
 lib/stock-signals.ts               Stooq quotes, SEC filings, and GDELT news context
@@ -53,16 +53,9 @@ SEC_USER_AGENT=hermes-agent-backend/2.0 contact@example.com
 GDELT_TIMEOUT_MS=3000
 GDELT_MAX_RECORDS=25
 
-NUVOLARI_API_BASE_URL=https://api.staging.nuvolari.ai
-NUVOLARI_API_KEY=
-NUVOLARI_SECRET_API_KEY=
-NUVOLARI_EXECUTION_QUOTE_PATH=/v1/execution/quote
-NUVOLARI_EXECUTION_EXECUTE_PATH=/v1/execution/execute
-
 ROBINHOOD_CHAIN_RPC_URL=https://robinhood-testnet.g.alchemy.com/v2/...
 ROBINHOOD_CHAIN_ID=46630
 ROBINHOOD_CHAIN_EXPLORER_URL=https://explorer.testnet.chain.robinhood.com/
-ROBINHOOD_STOCK_PROVIDER=nuvolari
 
 NEXT_PUBLIC_REOWN_PROJECT_ID=
 NEXT_PUBLIC_ROBINHOOD_CHAIN_RPC_URL=https://robinhood-testnet.g.alchemy.com/v2/...
@@ -92,7 +85,7 @@ The frontend loads in stages: supported stock catalog first, compact stock intel
 
 ## Deployment
 
-This repository is configured for Vercel as a Next.js app via `vercel.json`. The active backend is the set of Next API routes under `app/api/*`; external services are OpenRouter, Nuvolari staging, Kalshi public Trade API, Yahoo Finance, Stooq, SEC EDGAR, GDELT, and the Robinhood Chain testnet RPC/explorer.
+This repository is configured for Vercel as a Next.js app via `vercel.json`. The active backend is the set of Next API routes under `app/api/*`; external services are OpenRouter, Kalshi public Trade API, Yahoo Finance, Stooq, SEC EDGAR, GDELT, and the Robinhood Chain testnet RPC/explorer.
 
 Use a production Reown project ID with the deployed domain allowlisted. If `NEXT_PUBLIC_REOWN_PROJECT_ID` is empty, wallet connect controls intentionally stay disabled.
 

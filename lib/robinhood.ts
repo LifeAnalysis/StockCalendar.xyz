@@ -233,7 +233,7 @@ export type StockTradeInput = {
   target_asset: string;
   amount: string;
   wallet_address: string;
-  provider?: "auto" | "nuvolari";
+  provider?: "auto";
   slippagePercentage?: number;
   strategy?: string;
 };
@@ -264,20 +264,15 @@ export async function prepareStockTrade(input: StockTradeInput) {
     };
   }
 
-  const status = await robinhoodStatus();
-  if (!status.ok) {
-    return { ok: false, needs_configuration: "ROBINHOOD_CHAIN_RPC_URL", chain_status: status, intended_request: payload };
-  }
-
-  const baseUrl = env("NUVOLARI_API_BASE_URL", "https://api.staging.nuvolari.ai");
-  const path = env("NUVOLARI_EXECUTION_QUOTE_PATH", "/v1/execution/quote");
-  const result = await fetchJson(`${baseUrl.replace(/\/$/, "")}/${path.replace(/^\//, "")}`, {
-    method: "POST",
-    headers: {
-      ...(env("NUVOLARI_API_KEY") ? { "x-api-key": env("NUVOLARI_API_KEY") } : {}),
-      ...(env("NUVOLARI_SECRET_API_KEY") ? { Authorization: `Bearer ${env("NUVOLARI_SECRET_API_KEY")}` } : {})
-    },
-    body: payload
-  });
-  return { ...result, provider: "nuvolari", action: input.action, atomic: true, strategy: input.strategy || "", execution_boundary: "wallet_signature_required" };
+  return {
+    ok: false,
+    unsupported: true,
+    provider: null,
+    action: input.action,
+    atomic: false,
+    strategy: input.strategy || "",
+    execution_boundary: "quote_provider_required",
+    message: "Robinhood Chain stock-token quote preparation is disabled because no supported quote provider is configured.",
+    intended_request: payload
+  };
 }

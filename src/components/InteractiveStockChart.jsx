@@ -23,7 +23,49 @@ const chartConfig = {
   }
 };
 
-export const InteractiveStockChart = ({ chartData }) => {
+function formatAxisDate(value, selectedRange) {
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) return "";
+  if (selectedRange === "1D") {
+    return `${date.getDate()} ${date.toLocaleTimeString("en-US", {
+      hour: "numeric",
+      minute: "2-digit",
+      hour12: false
+    })}`;
+  }
+  if (selectedRange === "1Y") {
+    return date.toLocaleDateString("en-US", { month: "short" });
+  }
+  return date.toLocaleDateString("en-US", {
+    month: "short",
+    day: "numeric"
+  });
+}
+
+function formatTooltipDate(value, selectedRange) {
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) return "";
+  if (selectedRange === "1D") {
+    return date.toLocaleString("en-US", {
+      month: "short",
+      day: "numeric",
+      hour: "numeric",
+      minute: "2-digit"
+    });
+  }
+  if (selectedRange === "1Y") {
+    return date.toLocaleDateString("en-US", {
+      month: "short",
+      year: "numeric"
+    });
+  }
+  return date.toLocaleDateString("en-US", {
+    month: "short",
+    day: "numeric"
+  });
+}
+
+export const InteractiveStockChart = ({ chartData, selectedRange }) => {
   const formattedData = useMemo(
     () =>
       chartData
@@ -47,14 +89,16 @@ export const InteractiveStockChart = ({ chartData }) => {
     [chartData]
   );
 
-  const minValue = useMemo(
-    () => Math.min(...formattedData.map((item) => Math.min(item.open, item.close))),
-    [formattedData]
-  );
-  const maxValue = useMemo(
-    () => Math.max(...formattedData.map((item) => Math.max(item.open, item.close))),
-    [formattedData]
-  );
+  const yDomain = useMemo(() => {
+    if (!formattedData.length) return ["auto", "auto"];
+    const values = formattedData.flatMap((item) => [item.open, item.close]).filter(Number.isFinite);
+    const min = Math.min(...values);
+    const max = Math.max(...values);
+    const range = max - min;
+    const fallbackPadding = Math.max(Math.abs(max) * 0.0025, 0.35);
+    const padding = range > 0 ? Math.max(range * 0.2, fallbackPadding) : fallbackPadding;
+    return [min - padding, max + padding];
+  }, [formattedData]);
 
   if (!formattedData.length) return <div className="chart-fallback chart-state">Chart unavailable from Yahoo.</div>;
 
@@ -79,25 +123,14 @@ export const InteractiveStockChart = ({ chartData }) => {
                 axisLine={false}
                 tickMargin={8}
                 minTickGap={32}
-                tickFormatter={(value) => {
-                  const date = new Date(value);
-                  return date.toLocaleDateString("en-US", {
-                    month: "short",
-                    day: "numeric"
-                  });
-                }}
+                tickFormatter={(value) => formatAxisDate(value, selectedRange)}
               />
-              <YAxis domain={[minValue * 0.9, maxValue * 1.1]} tickFormatter={(value) => `$${value.toFixed(2)}`} />
+              <YAxis domain={yDomain} tickFormatter={(value) => `$${value.toFixed(2)}`} />
               <ChartTooltip
                 content={
                   <ChartTooltipContent
                     className="chart-tooltip-width"
-                    labelFormatter={(value) => {
-                      return new Date(value).toLocaleDateString("en-US", {
-                        month: "short",
-                        day: "numeric"
-                      });
-                    }}
+                    labelFormatter={(value) => formatTooltipDate(value, selectedRange)}
                   />
                 }
               />

@@ -1,0 +1,557 @@
+import { loadPortfolio } from "./parse";
+import {
+  historyKey,
+  loadHistory,
+  saveHistory,
+  statsFor,
+  upsertSnapshot,
+} from "./history";
+import {
+  ActivePositionRow,
+  RejectedRow,
+  WatchRow,
+  safeParseRow,
+} from "./schemas";
+import type {
+  DecisionAction,
+  DecisionEvent,
+  MarketAction,
+  MarketSnapshot,
+  MarketToken,
+  ParsedTable,
+  PortfolioSnapshot,
+} from "./types";
+import { cleanInlineMd } from "./fs-utils";
+import { formatPct } from "./format";
+
+type TokenCandidate = {
+  symbol: string;
+  name: string;
+  chain: string;
+  chainId: string;
+  address: string;
+  source: MarketToken["source"];
+  entryPrice: number | null;
+  entryTs: string | null;
+  allocation: string | null;
+  notes: string | null;
+};
+
+type DexPair = {
+  chainId?: string;
+  dexId?: string;
+  url?: string;
+  pairAddress?: string;
+  baseToken?: { address?: string; name?: string; symbol?: string };
+  quoteToken?: { symbol?: string };
+  priceUsd?: string | null;
+  txns?: Record<string, { buys?: number; sells?: number }>;
+  volume?: Record<string, number>;
+  priceChange?: Record<string, number>;
+  liquidity?: { usd?: number };
+  fdv?: number;
+  marketCap?: number;
+};
+
+const CHAIN_IDS: Record<string, string> = {
+  eth: "ethereum",
+  ethereum: "ethereum",
+  sol: "solana",
+  solana: "solana",
+  base: "base",
+  bsc: "bsc",
+  arb: "arbitrum",
+  arbitrum: "arbitrum",
+};
+
+function parseLooseUtc(raw: string | null | undefined): string | null {
+  if (!raw) return null;
+  const m = raw.trim().match(/^(\d{4}-\d{2}-\d{2})(?:\D+(\d{2}):(\d{2}))?/);
+  if (!m) return null;
+  const iso = m[2] ? `${m[1]}T${m[2]}:${m[3]}:00Z` : `${m[1]}T00:00:00Z`;
+  const ms = Date.parse(iso);
+  return Number.isFinite(ms) ? new Date(ms).toISOString() : null;
+}
+
+// Past FETCH_TTL serve stale + refresh in background; past STALE_TTL block.
+const FETCH_TTL_MS = 15_000;
+const STALE_TTL_MS = 30_000;
+// Throttle history writes so opening the page 50 times doesn't bloat the series.
+const PERSIST_INTERVAL_MS = 60_000;
+
+type FetchCache = {
+  ts: number;
+  pairMap: Map<string, DexPair>;
+  error?: string;
+  candidatesKey: string;
+};
+let fetchCache: FetchCache | null = null;
+let inflight: Promise<FetchCache> | null = null;
+let lastPersistMs = 0;
+
+function candidatesKey(candidates: TokenCandidate[]): string {
+  let key = "";
+  for (const c of candidates) key += `${c.chainId}:${c.address.toLowerCase()};`;
+  return key;
+}
+
+function refresh(candidates: TokenCandidate[], key: string): Promise<FetchCache> {
+  if (inflight) return inflight;
+  inflight = (async () => {
+    try {
+      const pairMap = await fetchDexPairs(candidates);
+      fetchCache = { ts: Date.now(), pairMap, candidatesKey: key };
+    } catch (e) {
+      fetchCache = {
+        ts: Date.now(),
+        pairMap: fetchCache?.pairMap ?? new Map(),
+        candidatesKey: key,
+        error: e instanceof Error ? e.message : "Failed to load market data",
+      };
+    }
+    return fetchCache!;
+  })();
+  inflight.finally(() => {
+    inflight = null;
+  });
+  return inflight;
+}
+
+async function getPairMap(candidates: TokenCandidate[]): Promise<FetchCache> {
+  const key = candidatesKey(candidates);
+  const now = Date.now();
+  if (fetchCache && fetchCache.candidatesKey === key && now - fetchCache.ts < FETCH_TTL_MS) {
+    return fetchCache;
+  }
+  if (fetchCache && fetchCache.candidatesKey === key && now - fetchCache.ts < STALE_TTL_MS) {
+    refresh(candidates, key);
+    return fetchCache;
+  }
+  return refresh(candidates, key);
+}
+
+export async function getMarketSnapshot(opts: { persist?: boolean; force?: boolean } = {}): Promise<MarketSnapshot> {
+  const persist = opts.persist ?? true;
+  const [portfolio, historyFile] = await Promise.all([loadPortfolio(), loadHistory()]);
+  const candidates = extractCandidates(portfolio);
+
+  if (candidates.length === 0) {
+    return {
+      updatedAt: new Date().toISOString(),
+      provider: "dexscreener",
+      tokens: [],
+      history: extractDecisionHistory(portfolio),
+    };
+  }
+
+  if (opts.force) fetchCache = null;
+  const cached = await getPairMap(candidates);
+  const pairMap = cached.pairMap;
+  const error = cached.error;
+
+  const ts = new Date().toISOString();
+  const now = Date.now();
+  const shouldPersist = persist && !error && now - lastPersistMs >= PERSIST_INTERVAL_MS;
+  if (shouldPersist) {
+    lastPersistMs = now;
+    for (const c of candidates) {
+      const pair = pairMap.get(historyKey(c.chainId, c.address));
+      const price = parseNumber(pair?.priceUsd);
+      if (price === null && !historyFile.tokens[historyKey(c.chainId, c.address)]) continue;
+      upsertSnapshot(
+        historyFile,
+        { symbol: c.symbol, chain: c.chain, chainId: c.chainId, address: c.address, source: c.source },
+        {
+          ts,
+          price,
+          liquidityUsd: pair?.liquidity?.usd ?? null,
+          marketCap: pair?.marketCap ?? null,
+          fdv: pair?.fdv ?? null,
+          h1: pair?.priceChange?.h1 ?? null,
+          h6: pair?.priceChange?.h6 ?? null,
+          h24: pair?.priceChange?.h24 ?? null,
+        }
+      );
+    }
+    historyFile.updatedAt = ts;
+    // Fire-and-forget: don't block render on disk write.
+    void saveHistory(historyFile).catch((e) => {
+      console.error("[saveHistory]", e);
+      lastPersistMs = 0;
+    });
+  }
+
+  return {
+    updatedAt: ts,
+    provider: "dexscreener",
+    tokens: candidates
+      .map((c) => {
+        const pair = pairMap.get(historyKey(c.chainId, c.address));
+        const tok = toMarketToken(c, pair);
+        const hist = historyFile.tokens[historyKey(c.chainId, c.address)];
+        return { ...tok, history: statsFor(hist, tok.priceUsd, tok.entryPrice, c.entryTs) };
+      })
+      // Hide drained pools (NYANDOG-style): liq < $100 = exit-impossible
+      // honeypot, the displayed price is fictional. Keep active positions
+      // visible regardless so we can still see our own bag rotting.
+      .filter((t) => {
+        if (t.action === "hold" || t.action === "sell") return true;
+        return (t.liquidityUsd ?? 0) >= 100;
+      }),
+    history: extractDecisionHistory(portfolio),
+    error,
+  };
+}
+
+function extractDecisionHistory(portfolio: PortfolioSnapshot): DecisionEvent[] {
+  const events: DecisionEvent[] = [];
+
+  portfolio.closedPositions?.rows.forEach((row) => {
+    events.push({
+      token: row.Token ?? "unknown",
+      chain: row.Chain ?? "",
+      action: "sold",
+      date: row.Close ?? row.Open ?? "",
+      price: row.Exit ?? null,
+      realized: cleanText(row.Realized ?? null),
+      reason: cleanText(row.Reason ?? "Closed position") ?? "Closed position",
+      source: "closed",
+    });
+  });
+
+  for (const timeline of [
+    ...portfolio.activeTimelines,
+    ...portfolio.watchlistTimelines,
+    ...portfolio.rejectedTimelines,
+  ]) {
+    timeline.table?.rows.forEach((row) => {
+      const eventText = row.event ?? row.Event ?? "";
+      const action = classifyEvent(eventText);
+      if (!action) return;
+      events.push({
+        token: timeline.symbol || row.token || "unknown",
+        chain: timeline.chain ?? "",
+        action,
+        date: row["ts (UTC)"] ?? row.ts ?? "",
+        price: cleanText(row.price ?? null),
+        realized: extractRealized(eventText),
+        reason: cleanText(eventText) ?? "",
+        source: "timeline",
+      });
+    });
+  }
+
+  return events
+    .sort((a, b) => {
+      if (a.source !== b.source) return a.source === "closed" ? -1 : 1;
+      return b.date.localeCompare(a.date);
+    })
+    .filter((event, index, all) => {
+      const key = `${event.token}:${event.action}:${event.date}:${event.reason}`;
+      return all.findIndex((other) => `${other.token}:${other.action}:${other.date}:${other.reason}` === key) === index;
+    })
+    .slice(0, 12);
+}
+
+function classifyEvent(eventText: string): DecisionAction | null {
+  if (/STOP HIT|CLOSE|TP1|BOOK WIN|BOOK LOSS/i.test(eventText)) return "sold";
+  if (/ENTRY|DISCOVERED \+ ENTRY/i.test(eventText)) return "entry";
+  if (/WATCH/i.test(eventText)) return "watch";
+  if (/DROP|DROPPED|REJECT/i.test(eventText)) return "pass";
+  return null;
+}
+
+function extractRealized(eventText: string): string | null {
+  const pct = eventText.match(/[-+]\d+(?:\.\d+)?%/);
+  return pct?.[0] ?? null;
+}
+
+function cleanText(value: string | null): string | null {
+  if (!value) return null;
+  return cleanInlineMd(value);
+}
+
+function extractCandidates(portfolio: PortfolioSnapshot): TokenCandidate[] {
+  // Validate rejected-lessons rows for fail-loud surfacing. We don't currently
+  // build candidates from this table (rejected candidates come from per-token
+  // timelines below), but a malformed row should still warn.
+  portfolio.rejectedLessons?.rows.forEach((row) => {
+    safeParseRow(RejectedRow, row, "Rejected lessons");
+  });
+
+  const out = new Map<string, TokenCandidate>();
+  const addressBySymbol = new Map<
+    string,
+    { address: string; chain: string; chainId: string; firstTimelineTs: string | null }
+  >();
+
+  for (const timeline of [
+    ...portfolio.activeTimelines,
+    ...portfolio.watchlistTimelines,
+    ...portfolio.rejectedTimelines,
+  ]) {
+    if (!timeline.address || !timeline.chain || !timeline.symbol) continue;
+    const chainId = normalizeChain(timeline.chain);
+    if (!chainId) continue;
+    const firstRow = timeline.table?.rows[0];
+    addressBySymbol.set(timeline.symbol.toLowerCase(), {
+      address: timeline.address,
+      chain: timeline.chain,
+      chainId,
+      firstTimelineTs: parseLooseUtc(firstRow?.["ts (UTC)"] ?? firstRow?.ts),
+    });
+  }
+
+  collectActive(portfolio.activePositions).forEach((candidate) => {
+    out.set(historyKey(candidate.chainId, candidate.address), candidate);
+  });
+
+  collectWatchlist(portfolio.watchlist, addressBySymbol).forEach((candidate) => {
+    out.set(historyKey(candidate.chainId, candidate.address), candidate);
+  });
+
+  portfolio.rejectedTimelines.forEach((timeline) => {
+    if (!timeline.address || !timeline.chain) return;
+    const chainId = normalizeChain(timeline.chain);
+    if (!chainId) return;
+    const key = historyKey(chainId, timeline.address);
+    if (out.has(key)) return;
+    out.set(key, {
+      symbol: timeline.symbol,
+      name: timeline.symbol,
+      chain: timeline.chain,
+      chainId,
+      address: timeline.address,
+      source: "rejected",
+      entryPrice: null,
+      entryTs: null,
+      allocation: null,
+      notes: timeline.notes.join(" "),
+    });
+  });
+
+  return Array.from(out.values());
+}
+
+function collectActive(table: ParsedTable | null): TokenCandidate[] {
+  if (!table) return [];
+  return table.rows.flatMap((row) => {
+    const parsed = safeParseRow(ActivePositionRow, row, "Active Positions");
+    if (!parsed) return [];
+    const chainId = normalizeChain(parsed.Chain);
+    if (!chainId) return [];
+    return [
+      {
+        symbol: extractSymbol(parsed.Token),
+        name: parsed.Token,
+        chain: parsed.Chain,
+        chainId,
+        address: parsed.Address,
+        source: "active" as const,
+        entryPrice: parsed["Entry $"],
+        entryTs: parsed["Date (UTC)"],
+        allocation: parsed.Allocation || null,
+        notes: parsed.Notes || null,
+      },
+    ];
+  });
+}
+
+function collectWatchlist(
+  table: ParsedTable | null,
+  addressBySymbol: Map<
+    string,
+    { address: string; chain: string; chainId: string; firstTimelineTs: string | null }
+  >
+): TokenCandidate[] {
+  if (!table) return [];
+  return table.rows.flatMap((row) => {
+    const parsed = safeParseRow(WatchRow, row, "Watchlist");
+    if (!parsed) return [];
+    const chainId = normalizeChain(parsed.Chain);
+    if (!chainId) return [];
+    const timelineToken = addressBySymbol.get(extractSymbol(parsed.Token).toLowerCase());
+    if (!timelineToken?.address) return [];
+    return [
+      {
+        symbol: extractSymbol(parsed.Token),
+        name: parsed.Token,
+        chain: parsed.Chain,
+        chainId: timelineToken.chainId,
+        address: timelineToken.address,
+        source: "watchlist" as const,
+        entryPrice: null,
+        entryTs: timelineToken.firstTimelineTs ?? parseLooseUtc(parsed.Date),
+        allocation: null,
+        notes: `${parsed["Why watching"]} ${parsed["Re-check trigger"]}`.trim(),
+      },
+    ];
+  });
+}
+
+async function fetchDexPairs(candidates: TokenCandidate[]): Promise<Map<string, DexPair>> {
+  // Use `latest/dex/tokens/{address}` (returns ALL pairs across DEXes/fee tiers)
+  // instead of `tokens/v1/{chain}/{addrs}` (returns only the top pair, often
+  // the wrong pool — e.g. uPEG V3 $119k instead of V4 $633k).
+  const results = await Promise.all(
+    candidates.map(async (candidate) => {
+      const res = await fetch(
+        `https://api.dexscreener.com/latest/dex/tokens/${candidate.address}`,
+        {
+          headers: { accept: "application/json" },
+          // Bypass Next.js Data Cache; the in-process FETCH_TTL_MS above is the
+          // single source of truth for freshness. Otherwise Next would pin the
+          // upstream response for 60s and stack on top of our memory cache.
+          cache: "no-store",
+        }
+      );
+      if (!res.ok) {
+        throw new Error(
+          `DexScreener ${candidate.chainId}:${candidate.address} returned HTTP ${res.status}`
+        );
+      }
+      const body = (await res.json()) as { pairs?: DexPair[] };
+      return (body.pairs ?? []).filter((p) => p.chainId === candidate.chainId);
+    })
+  );
+
+  const map = new Map<string, DexPair>();
+  for (const pair of results.flat()) {
+    const address = pair.baseToken?.address;
+    if (!pair.chainId || !address) continue;
+    const key = historyKey(pair.chainId, address);
+    const current = map.get(key);
+    if (!current || pairLiquidity(pair) > pairLiquidity(current)) {
+      map.set(key, pair);
+    }
+  }
+  return map;
+}
+
+function toMarketToken(candidate: TokenCandidate, pair: DexPair | null | undefined): MarketToken {
+  const priceUsd = parseNumber(pair?.priceUsd);
+  const pnlPct =
+    priceUsd !== null && candidate.entryPrice && candidate.entryPrice > 0
+      ? ((priceUsd - candidate.entryPrice) / candidate.entryPrice) * 100
+      : null;
+  const token = {
+    symbol: pair?.baseToken?.symbol ?? candidate.symbol,
+    name: pair?.baseToken?.name ?? candidate.name,
+    chain: candidate.chain,
+    chainId: candidate.chainId,
+    address: candidate.address,
+    source: candidate.source,
+    priceUsd,
+    entryPrice: candidate.entryPrice,
+    pnlPct,
+    liquidityUsd: pair?.liquidity?.usd ?? null,
+    fdv: pair?.fdv ?? null,
+    marketCap: pair?.marketCap ?? null,
+    volume24h: pair?.volume?.h24 ?? null,
+    h1Pct: pair?.priceChange?.h1 ?? null,
+    h6Pct: pair?.priceChange?.h6 ?? null,
+    h24Pct: pair?.priceChange?.h24 ?? null,
+    buysH1: pair?.txns?.h1?.buys ?? null,
+    sellsH1: pair?.txns?.h1?.sells ?? null,
+    pairUrl: pair?.url ?? null,
+    dexId: pair?.dexId ?? null,
+  };
+  const verdict = scoreAction(candidate, token);
+  return { ...token, ...verdict, history: null };
+}
+
+function scoreAction(
+  candidate: TokenCandidate,
+  token: Omit<MarketToken, "action" | "reason" | "history">
+): { action: MarketAction; reason: string } {
+  if (token.priceUsd === null) {
+    return { action: "unknown", reason: "No DexScreener pool found for this address." };
+  }
+
+  const h1 = token.h1Pct ?? 0;
+  const h6 = token.h6Pct ?? 0;
+  const h24 = token.h24Pct ?? 0;
+  const liq = token.liquidityUsd ?? 0;
+  const buys = token.buysH1 ?? 0;
+  const sells = token.sellsH1 ?? 0;
+  const buyPressure = buys > sells;
+
+  if (candidate.source === "active") {
+    const stopPct = inferStopPct(candidate.allocation, candidate.notes);
+    const takeProfitPct = inferTakeProfitPct(candidate.allocation, candidate.notes);
+    if (token.pnlPct !== null && token.pnlPct <= stopPct) {
+      return { action: "sell", reason: `Stop band hit (${formatPct(token.pnlPct)} vs ${stopPct}%).` };
+    }
+    if (liq > 0 && liq < 30_000) {
+      return { action: "sell", reason: "Liquidity is below $30k; paper rule treats this as unsafe." };
+    }
+    if (h1 <= -12 || h6 <= -25) {
+      return { action: "sell", reason: "Fresh drawdown is severe enough to re-check stop/lookback immediately." };
+    }
+    if (token.pnlPct !== null && token.pnlPct >= takeProfitPct) {
+      return { action: "sell", reason: `Take-profit band reached (${formatPct(token.pnlPct)}).` };
+    }
+    return {
+      action: "hold",
+      reason:
+        token.pnlPct === null
+          ? "Active position has live price but no parsed entry price."
+          : `Live P&L ${formatPct(token.pnlPct)}; above stop band (${stopPct}%).`,
+    };
+  }
+
+  if (candidate.source === "rejected") {
+    return { action: "pass", reason: "Already rejected by pipeline; market bounce alone does not clear hard kills." };
+  }
+
+  if (liq < 20_000) {
+    return { action: "pass", reason: "Liquidity below $20k; too thin for entry." };
+  }
+  if (h1 <= -10 || h6 <= -20) {
+    return { action: "pass", reason: "Momentum is actively unwinding." };
+  }
+  if (liq >= 30_000 && buyPressure && h1 > 0 && h6 > 5) {
+    return { action: "enter", reason: "Market-only trigger: liquidity, buy pressure, and h1/h6 momentum are aligned. Re-run full pipeline gates before sizing." };
+  }
+  if (h24 > 20 && liq >= 30_000) {
+    return { action: "watch", reason: "Trend is alive but short-window confirmation is incomplete." };
+  }
+  return { action: "watch", reason: "No hard market failure, but not enough live confirmation to enter." };
+}
+
+function normalizeChain(chain: string | undefined): string | null {
+  if (!chain) return null;
+  return CHAIN_IDS[chain.toLowerCase()] ?? null;
+}
+
+function extractSymbol(value: string): string {
+  return value.split(/[ (]/)[0] || value;
+}
+
+function parseNumber(value: string | number | null | undefined): number | null {
+  if (value === null || value === undefined) return null;
+  const n = typeof value === "number" ? value : Number(value);
+  return Number.isFinite(n) ? n : null;
+}
+
+function pairLiquidity(pair: DexPair): number {
+  return pair.liquidity?.usd ?? 0;
+}
+
+function inferStopPct(allocation: string | null, notes: string | null): number {
+  const text = `${allocation ?? ""} ${notes ?? ""}`;
+  const explicit = text.match(/stop[\s\S]*?\(\s*(-\d+)%\s*\)/i);
+  if (explicit) return Number(explicit[1]);
+  if (/C-tier|C\s*\(/i.test(text)) return -20;
+  if (/D-tier|D\s*\(/i.test(text)) return -15;
+  if (/B-tier|B\s*\(/i.test(text)) return -25;
+  return -30;
+}
+
+function inferTakeProfitPct(allocation: string | null, notes: string | null): number {
+  const text = `${allocation ?? ""} ${notes ?? ""}`;
+  if (/C-tier|C\s*\(/i.test(text)) return 60;
+  if (/D-tier|D\s*\(/i.test(text)) return 40;
+  if (/B-tier|B\s*\(/i.test(text)) return 75;
+  return 100;
+}

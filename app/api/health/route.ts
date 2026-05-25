@@ -5,7 +5,6 @@ export const dynamic = "force-dynamic";
 
 export async function GET() {
   const openrouterConfigured = Boolean(process.env.OPENROUTER_API_KEY?.trim());
-  const nuvolariConfigured = Boolean(process.env.NUVOLARI_API_KEY?.trim() || process.env.NUVOLARI_SECRET_API_KEY?.trim());
   const rpcConfigured = Boolean(robinhoodRpcUrl());
 
   return jsonResponse({
@@ -13,12 +12,12 @@ export async function GET() {
     runtime: "nextjs",
     model: process.env.OPENROUTER_MODEL || "deepseek/deepseek-v4-flash",
     openrouter_configured: openrouterConfigured,
-    nuvolari_configured: nuvolariConfigured,
     robinhood_chain: {
       chainId: robinhoodChainId(),
       explorer: robinhoodExplorer(),
       rpc_configured: rpcConfigured,
-      stock_trade_tool: "/api/robinhood/trade"
+      stock_trade_tool: null,
+      quote_provider_configured: false
     },
     data_pipeline: {
       intel_endpoint: "/api/robinhood/intel",

@@ -1,8 +1,8 @@
 {
-  "name": "nuvolari-hermes-agent",
+  "name": "hermes-robinhood-chain",
   "version": "2.0.0",
   "private": true,
-  "description": "Next.js Hermes command center for Nuvolari, Robinhood Chain stocks, and Kalshi intelligence.",
+  "description": "Next.js Hermes command center for Robinhood Chain stocks and Kalshi intelligence.",
   "scripts": {
     "dev": "node scripts/check-local-env.mjs && rm -rf .next && next build && next start",
     "dev:watch": "node scripts/check-local-env.mjs && rm -rf .next && next dev",

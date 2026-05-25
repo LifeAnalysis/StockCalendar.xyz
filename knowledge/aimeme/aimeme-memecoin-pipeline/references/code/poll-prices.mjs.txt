@@ -1,0 +1,296 @@
+#!/usr/bin/env node
+// Poll DexScreener for every token in portfolio.md and persist a snapshot to
+// ../data/price-history.db (SQLite). Runnable via `npm run poll` or cron.
+//
+// We deliberately re-implement candidate extraction + DB writes in plain JS
+// here instead of importing the TS lib, so the script runs without a build
+// step. Schema must stay in sync with dashboard/lib/db.ts.
+
+import { promises as fs } from "node:fs";
+import fsSync from "node:fs";
+import path from "node:path";
+import { fileURLToPath } from "node:url";
+import Database from "better-sqlite3";
+
+const __dirname = path.dirname(fileURLToPath(import.meta.url));
+const REPO_ROOT = path.resolve(__dirname, "..", "..");
+const PORTFOLIO_MD = path.join(REPO_ROOT, "portfolio.md");
+const DATA_DIR = path.join(REPO_ROOT, "data");
+const HISTORY_DB = path.join(DATA_DIR, "price-history.db");
+
+const CHAIN_IDS = {
+  eth: "ethereum",
+  ethereum: "ethereum",
+  sol: "solana",
+  solana: "solana",
+  base: "base",
+  bsc: "bsc",
+  arb: "arbitrum",
+  arbitrum: "arbitrum",
+};
+
+const SCHEMA = `
+CREATE TABLE IF NOT EXISTS tokens (
+  key TEXT PRIMARY KEY,
+  symbol TEXT, chain TEXT, chainId TEXT, address TEXT, source TEXT,
+  first_seen_ts TEXT, first_seen_price REAL,
+  last_seen_ts TEXT, last_seen_price REAL,
+  peak_price REAL, peak_ts TEXT,
+  trough_price REAL, trough_ts TEXT
+);
+CREATE TABLE IF NOT EXISTS snapshots (
+  token_key TEXT NOT NULL,
+  ts TEXT NOT NULL,
+  price REAL, liquidity_usd REAL, market_cap REAL, fdv REAL,
+  h1 REAL, h6 REAL, h24 REAL,
+  backfilled INTEGER DEFAULT 0,
+  source_tag TEXT,
+  PRIMARY KEY (token_key, ts)
+);
+CREATE INDEX IF NOT EXISTS idx_snapshots_token_ts ON snapshots(token_key, ts);
+`;
+
+function openDb() {
+  fsSync.mkdirSync(DATA_DIR, { recursive: true });
+  const db = new Database(HISTORY_DB);
+  db.pragma("journal_mode = WAL");
+  db.pragma("synchronous = NORMAL");
+  db.exec(SCHEMA);
+  return db;
+}
+
+async function main() {
+  const md = await fs.readFile(PORTFOLIO_MD, "utf8");
+  const candidates = extractCandidates(md);
+  if (candidates.length === 0) {
+    console.error("no candidates found in portfolio.md");
+    process.exit(1);
+  }
+  console.log(`polling ${candidates.length} tokens`);
+
+  const pairs = await fetchPairs(candidates);
+  const ts = new Date().toISOString();
+  const db = openDb();
+
+  const selectToken = db.prepare(`SELECT * FROM tokens WHERE key = ?`);
+  const upsertToken = db.prepare(`
+    INSERT INTO tokens (key, symbol, chain, chainId, address, source,
+      first_seen_ts, first_seen_price, last_seen_ts, last_seen_price,
+      peak_price, peak_ts, trough_price, trough_ts)
+    VALUES (@key, @symbol, @chain, @chainId, @address, @source,
+      @first_seen_ts, @first_seen_price, @last_seen_ts, @last_seen_price,
+      @peak_price, @peak_ts, @trough_price, @trough_ts)
+    ON CONFLICT(key) DO UPDATE SET
+      symbol=excluded.symbol, chain=excluded.chain, chainId=excluded.chainId,
+      address=excluded.address, source=excluded.source,
+      first_seen_ts=excluded.first_seen_ts, first_seen_price=excluded.first_seen_price,
+      last_seen_ts=excluded.last_seen_ts, last_seen_price=excluded.last_seen_price,
+      peak_price=excluded.peak_price, peak_ts=excluded.peak_ts,
+      trough_price=excluded.trough_price, trough_ts=excluded.trough_ts
+  `);
+  const insertSnap = db.prepare(`
+    INSERT OR IGNORE INTO snapshots
+      (token_key, ts, price, liquidity_usd, market_cap, fdv, h1, h6, h24)
+    VALUES (@token_key, @ts, @price, @liquidity_usd, @market_cap, @fdv, @h1, @h6, @h24)
+  `);
+
+  let written = 0;
+  const summaryRows = [];
+
+  const tx = db.transaction(() => {
+    for (const c of candidates) {
+      const key = `${c.chainId}:${c.address.toLowerCase()}`;
+      const pair = pairs.get(key);
+      const price = parseNum(pair?.priceUsd);
+      const existing = selectToken.get(key);
+      if (price === null && !existing) continue;
+
+      const snap = {
+        token_key: key,
+        ts,
+        price,
+        liquidity_usd: pair?.liquidity?.usd ?? null,
+        market_cap: pair?.marketCap ?? null,
+        fdv: pair?.fdv ?? null,
+        h1: pair?.priceChange?.h1 ?? null,
+        h6: pair?.priceChange?.h6 ?? null,
+        h24: pair?.priceChange?.h24 ?? null,
+      };
+      insertSnap.run(snap);
+
+      let row;
+      if (!existing) {
+        row = {
+          key,
+          symbol: c.symbol,
+          chain: c.chain,
+          chainId: c.chainId,
+          address: c.address,
+          source: c.source,
+          first_seen_ts: ts,
+          first_seen_price: price,
+          last_seen_ts: ts,
+          last_seen_price: price,
+          peak_price: price,
+          peak_ts: price !== null ? ts : null,
+          trough_price: price,
+          trough_ts: price !== null ? ts : null,
+        };
+      } else {
+        row = {
+          key,
+          symbol: c.symbol || existing.symbol,
+          chain: c.chain || existing.chain,
+          chainId: c.chainId || existing.chainId,
+          address: c.address || existing.address,
+          source: c.source,
+          first_seen_ts: existing.first_seen_ts || ts,
+          first_seen_price:
+            existing.first_seen_price === null ? price : existing.first_seen_price,
+          last_seen_ts: ts,
+          last_seen_price: price,
+          peak_price: existing.peak_price,
+          peak_ts: existing.peak_ts,
+          trough_price: existing.trough_price,
+          trough_ts: existing.trough_ts,
+        };
+        if (price !== null) {
+          if (row.peak_price === null || price > row.peak_price) {
+            row.peak_price = price;
+            row.peak_ts = ts;
+          }
+          if (row.trough_price === null || price < row.trough_price) {
+            row.trough_price = price;
+            row.trough_ts = ts;
+          }
+        }
+      }
+      upsertToken.run(row);
+      written++;
+      summaryRows.push(row);
+    }
+  });
+  tx();
+
+  console.log(`wrote ${written} snapshots → ${path.relative(REPO_ROOT, HISTORY_DB)}`);
+
+  // Summary uses point counts queried after the write.
+  const countStmt = db.prepare(`SELECT COUNT(*) AS n FROM snapshots WHERE token_key = ?`);
+  summaryRows.sort((a, b) => (a.symbol || "").localeCompare(b.symbol || ""));
+  for (const t of summaryRows) {
+    if (!t.first_seen_price || !t.last_seen_price) continue;
+    const pct = ((t.last_seen_price - t.first_seen_price) / t.first_seen_price) * 100;
+    const peakPct =
+      t.peak_price !== null
+        ? ((t.peak_price - t.first_seen_price) / t.first_seen_price) * 100
+        : 0;
+    const ageH = t.first_seen_ts
+      ? (Date.now() - new Date(t.first_seen_ts).getTime()) / 3_600_000
+      : 0;
+    const pts = countStmt.get(t.key)?.n ?? 0;
+    console.log(
+      `  ${(t.symbol || "").padEnd(10)} ${(t.source || "").padEnd(10)} since=${pct.toFixed(1).padStart(7)}%  peak=${peakPct.toFixed(1).padStart(7)}%  age=${ageH.toFixed(1)}h  pts=${pts}`
+    );
+  }
+
+  db.close();
+}
+
+function extractCandidates(md) {
+  const activeKeys = extractActivePositionKeys(md);
+  // Find every `### Symbol (chain) — `address`` heading inside timeline sections.
+  const out = new Map();
+  const re = /^###\s+([^\n]+)$/gm;
+  let m;
+  while ((m = re.exec(md)) !== null) {
+    const heading = m[1].trim();
+    const addrMatch = heading.match(/`([^`]+)`/);
+    const chainMatch = heading.match(/\(([^)]+)\)/);
+    const symMatch = heading.match(/^([^(—–`-]+)/);
+    if (!addrMatch || !chainMatch) continue;
+    const chain = chainMatch[1].trim().toLowerCase();
+    const chainId = CHAIN_IDS[chain];
+    if (!chainId) continue;
+    const address = addrMatch[1].trim();
+    const symbol = (symMatch ? symMatch[1] : heading).trim();
+    const before = md.slice(0, m.index);
+    const sectRe = /##\s+(Active|Watchlist|Rejected)\s+token\s+timelines/gi;
+    let lastKind = null;
+    let sm;
+    while ((sm = sectRe.exec(before)) !== null) lastKind = sm[1].toLowerCase();
+    const key = `${chainId}:${address.toLowerCase()}`;
+    const source =
+      activeKeys.has(key) ? "active" : lastKind === "rejected" ? "rejected" : "watchlist";
+    if (!out.has(key)) out.set(key, { symbol, chain, chainId, address, source });
+  }
+  return [...out.values()];
+}
+
+function extractActivePositionKeys(md) {
+  const keys = new Set();
+  const section = sectionBody(md, "Active Positions");
+  if (!section) return keys;
+  for (const line of section.split("\n")) {
+    if (!line.trim().startsWith("|")) continue;
+    const cells = line.split("|").map((c) => c.trim());
+    if (cells.length < 6) continue;
+    const chain = cells[4]?.toLowerCase();
+    const chainId = CHAIN_IDS[chain];
+    const address = cells[5]?.replace(/`/g, "").trim();
+    if (!chainId || !address) continue;
+    keys.add(`${chainId}:${address.toLowerCase()}`);
+  }
+  return keys;
+}
+
+function sectionBody(md, title) {
+  const startRe = new RegExp(`^##\\s+${title}\\s*$`, "im");
+  const start = md.search(startRe);
+  if (start === -1) return "";
+  const rest = md.slice(start);
+  const next = rest.slice(1).search(/^##\s+/m);
+  return next === -1 ? rest : rest.slice(0, next + 1);
+}
+
+async function fetchPairs(candidates) {
+  const out = new Map();
+  await Promise.all(
+    candidates.map(async (candidate) => {
+      const url = `https://api.dexscreener.com/latest/dex/tokens/${candidate.address}`;
+      try {
+        const res = await fetch(url, { headers: { accept: "application/json" } });
+        if (!res.ok) {
+          console.error(`dexscreener ${candidate.chainId}:${candidate.address} ${res.status}`);
+          return;
+        }
+        const json = await res.json();
+        for (const pair of json.pairs ?? []) {
+          if (pair?.chainId !== candidate.chainId) continue;
+          const addr = pair?.baseToken?.address;
+          if (!addr) continue;
+          const key = `${pair.chainId}:${addr.toLowerCase()}`;
+          const cur = out.get(key);
+          if (!cur || (pair.liquidity?.usd ?? 0) > (cur.liquidity?.usd ?? 0)) {
+            out.set(key, pair);
+          }
+        }
+      } catch (e) {
+        console.error(
+          `dexscreener ${candidate.chainId}:${candidate.address} fetch failed: ${e?.message ?? e}`
+        );
+      }
+    })
+  );
+  return out;
+}
+
+function parseNum(v) {
+  if (v === null || v === undefined) return null;
+  const n = typeof v === "number" ? v : Number(v);
+  return Number.isFinite(n) ? n : null;
+}
+
+main().catch((e) => {
+  console.error(e);
+  process.exit(1);
+});

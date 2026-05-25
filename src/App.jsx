@@ -386,7 +386,7 @@ function StockChartView({ data, ticker, status, selectedRange }) {
   return data?.length ? (
     <div className="chart-shell">
       <React.Suspense fallback={<div className="chart-fallback" />}>
-        <InteractiveStockChart chartData={data} ticker={ticker} key={`${ticker}-${selectedRange}-${data.length}`} />
+        <InteractiveStockChart chartData={data} ticker={ticker} selectedRange={selectedRange} key={`${ticker}-${selectedRange}-${data.length}`} />
       </React.Suspense>
     </div>
   ) : (
@@ -753,73 +753,79 @@ function HermesDataTable({ stocks, hermesOutput }) {
 }
 
 function EarningsBacktestTable({ stock, backtest, loading }) {
+  const [expanded, setExpanded] = React.useState(false);
   const rows = backtest?.rows || [];
   return (
-    <section className="hermes-module earnings-backtest" aria-label="Hermes earnings backtest">
-      <div className="module-head">
+    <section className={`hermes-module earnings-backtest ${expanded ? "expanded" : ""}`} aria-label="Hermes backtest">
+      <button className="backtest-toggle" type="button" aria-expanded={expanded} onClick={() => setExpanded((current) => !current)}>
         <div>
-          <div className="module-kicker">Earnings backtest</div>
-          <h3>Previous 3 earnings</h3>
+          <h3>Hermes Backtest</h3>
+          <span>{loading ? "Running" : rows.length ? "Previous 3 earnings" : "No rows yet"}</span>
         </div>
-      </div>
-      {loading ? (
-        <div className="backtest-loading">
-          <MotionAsset src="/media/icons/hermes-output-orb.mp4" webmSrc="/media/icons/hermes-output-orb.webm" className="backtest-motion" />
-          <div>
-            <strong>Hermes is benchmarking {stock?.symbol || "stock"} earnings</strong>
-            <span>Checking price reaction, Kalshi matches, date-bounded news, and model commentary.</span>
+        {expanded ? <MinusIcon /> : <PlusIcon />}
+      </button>
+      {expanded ? (
+        <>
+          {loading ? (
+            <div className="backtest-loading">
+              <MotionAsset src="/media/icons/hermes-output-orb.mp4" webmSrc="/media/icons/hermes-output-orb.webm" className="backtest-motion" />
+              <div>
+                <strong>Hermes is benchmarking {stock?.symbol || "stock"} earnings</strong>
+                <span>Checking price reaction, Kalshi matches, date-bounded news, and model commentary.</span>
+              </div>
+            </div>
+          ) : rows.length ? (
+            <div className="backtest-table-wrap">
+              <table className="backtest-table">
+                <thead>
+                  <tr>
+                    <th>Date</th>
+                    <th>Move</th>
+                    <th>Benchmark</th>
+                    <th>Kalshi</th>
+                    <th>News</th>
+                    <th>Hermes read</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {rows.map((row) => (
+                    <tr key={`${row.symbol}-${row.earnings_date}`}>
+                      <td>
+                        <strong>{formatEarningsDate(row.earnings_date)}</strong>
+                        <small>{row.quarter}</small>
+                      </td>
+                      <td>
+                        <strong className={Number(row.move_percent) >= 0 ? "positive" : "negative"}>
+                          {row.move_percent === undefined ? "n/a" : `${row.move_percent}%`}
+                        </strong>
+                        <small>{formatMoney(row.price_before)} → {formatMoney(row.price_after)}</small>
+                      </td>
+                      <td>
+                        <span className={`benchmark-pill ${row.benchmark}`}>{row.benchmark}</span>
+                      </td>
+                      <td>
+                        <strong>{row.kalshi?.matched ? `${row.kalshi.market_count} match${row.kalshi.market_count === 1 ? "" : "es"}` : "No match"}</strong>
+                        <small>{row.kalshi?.top_market?.ticker || "Public feed did not return a usable historic market"}</small>
+                      </td>
+                      <td>
+                        <strong>{row.news?.article_count || 0} articles</strong>
+                        <small>{row.news?.top_headlines?.[0] || "No bounded headline returned"}</small>
+                      </td>
+                      <td>{row.analysis}</td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          ) : (
+            <p className="module-empty">No backtest rows returned for {stock?.symbol || "this stock"}.</p>
+          )}
+          <div className="source-footnote">
+            <span>Sources</span>
+            <p>Yahoo Chart OHLC, GDELT event-window headlines, Kalshi public markets, and OpenRouter analysis.</p>
           </div>
-        </div>
-      ) : rows.length ? (
-        <div className="backtest-table-wrap">
-          <table className="backtest-table">
-            <thead>
-              <tr>
-                <th>Date</th>
-                <th>Move</th>
-                <th>Benchmark</th>
-                <th>Kalshi</th>
-                <th>News</th>
-                <th>Hermes read</th>
-              </tr>
-            </thead>
-            <tbody>
-              {rows.map((row) => (
-                <tr key={`${row.symbol}-${row.earnings_date}`}>
-                  <td>
-                    <strong>{formatEarningsDate(row.earnings_date)}</strong>
-                    <small>{row.quarter}</small>
-                  </td>
-                  <td>
-                    <strong className={Number(row.move_percent) >= 0 ? "positive" : "negative"}>
-                      {row.move_percent === undefined ? "n/a" : `${row.move_percent}%`}
-                    </strong>
-                    <small>{formatMoney(row.price_before)} → {formatMoney(row.price_after)}</small>
-                  </td>
-                  <td>
-                    <span className={`benchmark-pill ${row.benchmark}`}>{row.benchmark}</span>
-                  </td>
-                  <td>
-                    <strong>{row.kalshi?.matched ? `${row.kalshi.market_count} match${row.kalshi.market_count === 1 ? "" : "es"}` : "No match"}</strong>
-                    <small>{row.kalshi?.top_market?.ticker || "Public feed did not return a usable historic market"}</small>
-                  </td>
-                  <td>
-                    <strong>{row.news?.article_count || 0} articles</strong>
-                    <small>{row.news?.top_headlines?.[0] || "No bounded headline returned"}</small>
-                  </td>
-                  <td>{row.analysis}</td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
-        </div>
-      ) : (
-        <p className="module-empty">No backtest rows returned for {stock?.symbol || "this stock"}.</p>
-      )}
-      <div className="source-footnote">
-        <span>Sources</span>
-        <p>Yahoo Chart OHLC, GDELT event-window headlines, Kalshi public markets, and OpenRouter analysis.</p>
-      </div>
+        </>
+      ) : null}
     </section>
   );
 }
@@ -993,52 +999,6 @@ function ConfidenceDecomposition({ stock, hermesOutput }) {
   );
 }
 
-function EarningsCockpit({ stock, hermesOutput }) {
-  const { calendar } = getHermesContext(stock, hermesOutput);
-  const earnings = stock ? earningsSummary(stock.symbol) : {};
-  const backendDate = calendar?.earnings_dates?.[0];
-  const nextDate = backendDate || earnings.next?.date;
-  const latestDate = earnings.latest?.date;
-  const publicLinks = calendar?.public_links || [];
-
-  return (
-    <section className="hermes-module earnings-cockpit" aria-label="Earnings cockpit">
-      <div className="module-kicker">Earnings cockpit</div>
-      <div className="cockpit-grid">
-        <div>
-          <span>Next earnings</span>
-          <strong>{nextDate ? formatEarningsDate(nextDate) : "n/a"}</strong>
-        </div>
-        <div>
-          <span>Period</span>
-          <strong>{eventQuarter(nextDate)}</strong>
-        </div>
-        <div>
-          <span>EPS estimate</span>
-          <strong>{calendar?.estimates?.earnings_average || "n/a"}</strong>
-        </div>
-        <div>
-          <span>Revenue estimate</span>
-          <strong>{calendar?.estimates?.revenue_average || "n/a"}</strong>
-        </div>
-        <div>
-          <span>Last earnings</span>
-          <strong>{latestDate ? formatEarningsDate(latestDate) : "n/a"}</strong>
-        </div>
-        <div>
-          <span>Calendar feed</span>
-          <strong>{qualityText(calendar?.ok)}</strong>
-        </div>
-      </div>
-      <div className="source-links">
-        {publicLinks.slice(0, 2).map((link) => (
-          <a key={link} href={link} target="_blank" rel="noreferrer">calendar source</a>
-        ))}
-      </div>
-    </section>
-  );
-}
-
 function PredictionMarketOverlay({ stock, hermesOutput }) {
   const { kalshi } = getHermesContext(stock, hermesOutput);
   const markets = (kalshi?.markets || []).slice(0, 3);
@@ -1046,7 +1006,6 @@ function PredictionMarketOverlay({ stock, hermesOutput }) {
   return (
     <section className="hermes-module prediction-overlay" aria-label="Prediction market overlay">
       <div className="module-head prediction-head">
-        <MotionAsset src="/media/icons/wallet-connect-orb.mp4" webmSrc="/media/icons/wallet-connect-orb.webm" className="prediction-title-motion" />
         <div>
           <h3 className="kalshi-market-title">
             <img src="/logos/kalshilogopng.png" alt="Kalshi" />
@@ -1211,6 +1170,7 @@ function buildCalendarDays(monthDate) {
 }
 
 function EarningsCalendar({ events, stocks, monthDate, onMonthChange, onSelectStock }) {
+  const [expanded, setExpanded] = React.useState(false);
   const supported = React.useMemo(() => new Map(stocks.map((item) => [item.symbol, item])), [stocks]);
   const eventsByDate = React.useMemo(() => {
     const grouped = new Map();
@@ -1229,9 +1189,12 @@ function EarningsCalendar({ events, stocks, monthDate, onMonthChange, onSelectSt
   const weekdayLabels = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"];
 
   return (
-    <section className="earnings-calendar" aria-label="Supported stock earnings calendar">
+    <section className={`earnings-calendar ${expanded ? "expanded" : ""}`} aria-label="Supported stock earnings calendar">
       <div className="earnings-calendar-toolbar">
-        <h3>{monthTitle(monthDate)}</h3>
+        <button className="calendar-toggle" type="button" aria-expanded={expanded} onClick={() => setExpanded((current) => !current)}>
+          <span>Earnings Calendar</span>
+          {expanded ? <MinusIcon /> : <PlusIcon />}
+        </button>
         <button className="calendar-icon-button" type="button" aria-label="Previous month" onClick={() => onMonthChange(addMonths(monthDate, -1))}>
           <ChevronLeftIcon />
         </button>
@@ -1239,39 +1202,43 @@ function EarningsCalendar({ events, stocks, monthDate, onMonthChange, onSelectSt
           <ChevronRightIcon />
         </button>
       </div>
-      <div className="earnings-calendar-weekdays">
-        {weekdayLabels.map((label) => <span key={label}>{label}</span>)}
-      </div>
-      <div className="earnings-calendar-grid">
-        {days.map((day) => {
-          const key = dateKey(day);
-          const inMonth = day.getMonth() === monthDate.getMonth();
-          const isToday = key === dateKey(today);
-          const dayEvents = eventsByDate.get(key) || [];
-          return (
-            <div className={`earnings-day ${inMonth ? "" : "outside"} ${isToday ? "today" : ""}`} key={key}>
-              <div className="earnings-day-number">{day.getDate()}</div>
-              <div className="earnings-day-events">
-                {dayEvents.map((event) => {
-                  const eventStock = supported.get(event.symbol);
-                  return (
-                    <button
-                      className={`earnings-event ${event.symbol.toLowerCase()}`}
-                      key={`${event.symbol}-${event.date}`}
-                      type="button"
-                      onClick={() => onSelectStock(event.symbol)}
-                      aria-label={`${event.symbol} earnings on ${formatEarningsDate(event.date)}`}
-                    >
-                      {eventStock ? <Logo stock={eventStock} /> : null}
-                      <span>{event.symbol}</span>
-                    </button>
-                  );
-                })}
-              </div>
-            </div>
-          );
-        })}
-      </div>
+      {expanded ? (
+        <>
+          <div className="earnings-calendar-weekdays">
+            {weekdayLabels.map((label) => <span key={label}>{label}</span>)}
+          </div>
+          <div className="earnings-calendar-grid">
+            {days.map((day) => {
+              const key = dateKey(day);
+              const inMonth = day.getMonth() === monthDate.getMonth();
+              const isToday = key === dateKey(today);
+              const dayEvents = eventsByDate.get(key) || [];
+              return (
+                <div className={`earnings-day ${inMonth ? "" : "outside"} ${isToday ? "today" : ""}`} key={key}>
+                  <div className="earnings-day-number">{day.getDate()}</div>
+                  <div className="earnings-day-events">
+                    {dayEvents.map((event) => {
+                      const eventStock = supported.get(event.symbol);
+                      return (
+                        <button
+                          className={`earnings-event ${event.symbol.toLowerCase()}`}
+                          key={`${event.symbol}-${event.date}`}
+                          type="button"
+                          onClick={() => onSelectStock(event.symbol)}
+                          aria-label={`${event.symbol} earnings on ${formatEarningsDate(event.date)}`}
+                        >
+                          {eventStock ? <Logo stock={eventStock} /> : null}
+                          <span>{event.symbol}</span>
+                        </button>
+                      );
+                    })}
+                  </div>
+                </div>
+              );
+            })}
+          </div>
+        </>
+      ) : null}
     </section>
   );
 }
@@ -1628,6 +1595,10 @@ function App() {
       await executeQuoteTransactions();
       return;
     }
+    if (!backend.trade) {
+      setTradeError("Quote preparation is disabled until a provider with Robinhood Chain stock-token support is configured.");
+      return;
+    }
 
     const payload = routePayload();
     if (!payload) {
@@ -1635,12 +1606,12 @@ function App() {
       return;
     }
     if (!payload.wallet_address || !payload.amount) {
-      setTradeError("Connect wallet and enter an amount to prepare a Nuvolari quote.");
+      setTradeError("Connect wallet and enter an amount to prepare a quote.");
       return;
     }
     setIsPreparingQuote(true);
     setTradeError("");
-    setTradeStatus("Preparing Nuvolari quote...");
+    setTradeStatus("Preparing quote...");
     try {
       const res = await fetch("/api/robinhood/trade", {
         method: "POST",
@@ -1682,6 +1653,7 @@ function App() {
     if (isPreparingQuote) return "Preparing quote";
     if (isExecutingQuote || walletPending) return "Waiting for wallet";
     if (quoteTransactions.length) return quoteTransactions.length === 1 ? "Sign swap" : `Sign ${quoteTransactions.length} txs`;
+    if (!backend.trade) return "Quote provider unavailable";
     return "Prepare quote";
   }
 
@@ -1883,10 +1855,9 @@ function App() {
                 selectedRange={chartRange}
               />
               <HermesOutputBar stock={stock} hermesOutput={hermesOutput} loading={hermesLoading} progress={hermesProgress} />
+              <ConfidenceDecomposition stock={stock} hermesOutput={hermesOutput} />
               <HermesReasoningGraph stock={stock} hermesOutput={hermesOutput} loading={hermesLoading} />
               <EarningsBacktestTable stock={stock} backtest={backtests[stock.symbol]} loading={backtestStatus === "loading" && !backtests[stock.symbol]} />
-              <ConfidenceDecomposition stock={stock} hermesOutput={hermesOutput} />
-              <EarningsCockpit stock={stock} hermesOutput={hermesOutput} />
               <PredictionMarketOverlay stock={stock} hermesOutput={hermesOutput} />
               <DataProvenanceView hermesOutput={hermesOutput} />
               <PostTradeJournal entries={journalEntries} stock={stock} />

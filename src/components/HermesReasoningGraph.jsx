@@ -37,16 +37,6 @@ function RotateCcwIcon() {
   );
 }
 
-function splitDetail(value) {
-  const text = String(value || "").trim();
-  if (!text) return [];
-  return text
-    .split(/(?:;\s+|\.\s+| · )/)
-    .map((part) => part.trim().replace(/\.$/, ""))
-    .filter(Boolean)
-    .slice(0, 5);
-}
-
 function addNode(nodes, node) {
   if (!node?.id || nodes.some((item) => item.data.id === node.id)) return;
   const meta = NODE_TYPES[node.type] || NODE_TYPES.source;
@@ -228,12 +218,6 @@ export function HermesReasoningGraph({ stock, hermesOutput, loading }) {
   const containerRef = React.useRef(null);
   const cyRef = React.useRef(null);
   const graph = React.useMemo(() => buildGraph(stock, hermesOutput, loading), [stock, hermesOutput, loading]);
-  const [selectedNode, setSelectedNode] = React.useState(graph.selected);
-  const selectedDetails = splitDetail(selectedNode?.detail || "Select a graph node to inspect the source or signal.");
-
-  React.useEffect(() => {
-    setSelectedNode(graph.selected);
-  }, [graph.selected]);
 
   React.useEffect(() => {
     if (!containerRef.current) return undefined;
@@ -242,6 +226,13 @@ export function HermesReasoningGraph({ stock, hermesOutput, loading }) {
       container: containerRef.current,
       elements: [...graph.nodes, ...graph.edges],
       autoungrabify: false,
+      boxSelectionEnabled: false,
+      maxZoom: 1,
+      minZoom: 1,
+      panningEnabled: false,
+      userPanningEnabled: false,
+      userZoomingEnabled: false,
+      zoom: 1,
       style: [
         {
           selector: "node",
@@ -316,13 +307,6 @@ export function HermesReasoningGraph({ stock, hermesOutput, loading }) {
       }
     });
 
-    cy.on("tap", "node", (event) => {
-      setSelectedNode(event.target.data());
-    });
-    cy.on("tap", (event) => {
-      if (event.target === cy) setSelectedNode(graph.selected);
-    });
-
     cyRef.current = cy;
     return () => {
       cy.destroy();
@@ -349,18 +333,6 @@ export function HermesReasoningGraph({ stock, hermesOutput, loading }) {
       </div>
       <div className="reasoning-graph-layout">
         <div className="reasoning-graph-canvas" ref={containerRef} role="img" aria-label="Linked Hermes sources and decision evidence"></div>
-        <aside className="reasoning-node-panel">
-          <span>{selectedNode?.typeLabel || "Node"}</span>
-          <strong>{selectedNode?.label || "No node selected"}</strong>
-          <div className="reasoning-node-detail-list">
-            {selectedDetails.map((detail) => <p key={detail}>{detail}</p>)}
-          </div>
-          {selectedNode?.href ? (
-            <a href={selectedNode.href} target="_blank" rel="noreferrer">
-              Open linked source
-            </a>
-          ) : null}
-        </aside>
       </div>
       <div className="reasoning-graph-legend" aria-label="Evidence graph legend">
         {Object.entries(NODE_TYPES).map(([key, value]) => (

@@ -1,0 +1,1 @@
+<!-- PROPOSE DELETE: R4 violation — dated post-mortem of three specific dashboard bugs; durable lessons already covered in dexscreener-pair-selection.md and drained-pool-honeypot.md. Content migrated to outputs/2026-04-28-migrated-dashboard-numbers-audit-lessons.md. -->
