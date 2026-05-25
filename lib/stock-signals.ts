@@ -39,6 +39,16 @@ type GdeltResponse = {
   }>;
 };
 
+type YahooSearchResponse = {
+  news?: Array<{
+    title?: string;
+    link?: string;
+    publisher?: string;
+    providerPublishTime?: number;
+    relatedTickers?: string[];
+  }>;
+};
+
 type YahooChartResponse = {
   chart?: {
     result?: Array<{
@@ -140,6 +150,8 @@ const STOOQ_SOURCE = "https://stooq.com/q/l/";
 const YAHOO_CHART_SOURCE = "https://query1.finance.yahoo.com/v8/finance/chart/";
 const SEC_SOURCE = "https://data.sec.gov/submissions/";
 const GDELT_SOURCE = "https://api.gdeltproject.org/api/v2/doc/doc";
+const YAHOO_SEARCH_SOURCE = "https://query1.finance.yahoo.com/v1/finance/search";
+const YAHOO_RSS_SOURCE = "https://feeds.finance.yahoo.com/rss/2.0/headline";
 
 let stockSignalsCache: { ts: number; key: string; value: StockSignals } | null = null;
 
@@ -362,6 +374,119 @@ function articleMatchesStock(stock: RobinhoodToken, title = ""): boolean {
   return stock.aliases.some((alias) => text.includes(alias.toLowerCase())) || text.includes(stock.name.toLowerCase());
 }
 
+function timestampToIso(value?: number): string | undefined {
+  return value ? new Date(value * 1000).toISOString() : undefined;
+}
+
+function xmlText(value = ""): string {
+  return value
+    .replace(/<!\[CDATA\[([\s\S]*?)\]\]>/g, "$1")
+    .replace(/&amp;/g, "&")
+    .replace(/&quot;/g, "\"")
+    .replace(/&#39;/g, "'")
+    .replace(/&lt;/g, "<")
+    .replace(/&gt;/g, ">")
+    .replace(/<[^>]*>/g, " ")
+    .replace(/\s+/g, " ")
+    .trim();
+}
+
+function domainFromUrl(value?: string): string | undefined {
+  if (!value) return undefined;
+  try {
+    return new URL(value).hostname.replace(/^www\./, "");
+  } catch {
+    return undefined;
+  }
+}
+
+function parseYahooRss(text: string, stock: RobinhoodToken): NewsSnapshot["top_articles"] {
+  const items = text.match(/<item>[\s\S]*?<\/item>/g) || [];
+  return items
+    .map((item) => {
+      const description = xmlText(/<description>([\s\S]*?)<\/description>/i.exec(item)?.[1] || "");
+      return { item, description };
+    })
+    .filter(({ item, description }) => articleMatchesStock(stock, `${item} ${description}`))
+    .slice(0, 4)
+    .map(({ item }) => {
+      const title = xmlText(/<title>([\s\S]*?)<\/title>/i.exec(item)?.[1] || "Untitled article");
+      const url = xmlText(/<link>([\s\S]*?)<\/link>/i.exec(item)?.[1] || "");
+      const pubDate = xmlText(/<pubDate>([\s\S]*?)<\/pubDate>/i.exec(item)?.[1] || "");
+      const parsedDate = pubDate ? new Date(pubDate) : null;
+      return {
+        title,
+        url: url || undefined,
+        domain: domainFromUrl(url),
+        seen_date: parsedDate && !Number.isNaN(parsedDate.getTime()) ? parsedDate.toISOString() : undefined
+      };
+    });
+}
+
+async function fetchYahooNews(stock: RobinhoodToken): Promise<NewsSnapshot> {
+  const rssParams = new URLSearchParams({
+    s: stock.symbol,
+    region: "US",
+    lang: "en-US"
+  });
+  const rssResponse = await fetchText(`${YAHOO_RSS_SOURCE}?${rssParams.toString()}`, {
+    headers: {
+      Accept: "application/rss+xml,text/xml,*/*",
+      "User-Agent": "Mozilla/5.0 hermes-next-agent/2.0"
+    },
+    timeoutMs: Number(env("YAHOO_NEWS_TIMEOUT_MS", "6000")) || 6000
+  });
+  if (rssResponse.ok) {
+    const articles = parseYahooRss(rssResponse.text, stock);
+    if (articles.length) {
+      return {
+        symbol: stock.symbol,
+        ok: true,
+        source: YAHOO_RSS_SOURCE,
+        article_count: articles.length,
+        top_articles: articles
+      };
+    }
+  }
+
+  const params = new URLSearchParams({
+    q: `${stock.symbol} stock`,
+    newsCount: env("YAHOO_NEWS_COUNT", "6"),
+    quotesCount: "1"
+  });
+  const response = await fetchJson<YahooSearchResponse>(`${YAHOO_SEARCH_SOURCE}?${params.toString()}`, {
+    timeoutMs: Number(env("YAHOO_NEWS_TIMEOUT_MS", "6000")) || 6000
+  });
+  if (!response.ok || !response.data?.news) {
+    return {
+      symbol: stock.symbol,
+      ok: false,
+      source: YAHOO_SEARCH_SOURCE,
+      article_count: 0,
+      top_articles: [],
+      error: rssResponse.error || response.error || "yahoo_news_unavailable"
+    };
+  }
+
+  const articles = response.data.news
+    .filter((article) => article.relatedTickers?.includes(stock.symbol) || articleMatchesStock(stock, article.title))
+    .slice(0, 4)
+    .map((article) => ({
+      title: article.title || "Untitled article",
+      url: article.link,
+      domain: article.publisher,
+      seen_date: timestampToIso(article.providerPublishTime)
+    }));
+
+  return {
+    symbol: stock.symbol,
+    ok: true,
+    source: YAHOO_SEARCH_SOURCE,
+    article_count: articles.length,
+    top_articles: articles
+  };
+}
+
 async function fetchNews(stocks: RobinhoodToken[]): Promise<NewsSnapshot[]> {
   const base = stocks.map((stock) => ({
     symbol: stock.symbol,
@@ -379,9 +504,13 @@ async function fetchNews(stocks: RobinhoodToken[]): Promise<NewsSnapshot[]> {
     sort: "HybridRel"
   });
   const response = await fetchJson<GdeltResponse>(`${GDELT_SOURCE}?${params.toString()}`, {
-    timeoutMs: Number(env("GDELT_TIMEOUT_MS", "3000")) || 3000
+    timeoutMs: Number(env("GDELT_TIMEOUT_MS", "6000")) || 6000
   });
   if (!response.ok || !response.data?.articles) {
+    const yahooFallback = await Promise.all(stocks.map((stock) => fetchYahooNews(stock)));
+    if (yahooFallback.some((row) => row.ok && row.article_count > 0)) {
+      return yahooFallback;
+    }
     return base.map((row) => ({ ...row, error: response.error || "gdelt_request_failed_or_rate_limited" }));
   }
 
@@ -417,7 +546,7 @@ function timeoutFallbacks(stocks: RobinhoodToken[]): StockSignals {
 }
 
 export async function fetchStockSignals(stocks = robinhoodStockTokens): Promise<StockSignals> {
-  const sourceNote = "Hermes uses Stooq public quotes with Yahoo Chart fallback, SEC EDGAR submissions, and GDELT news as supporting stock context before any Robinhood Chain quote preparation.";
+  const sourceNote = "Hermes uses Stooq public quotes with Yahoo Chart fallback, SEC EDGAR submissions, and GDELT news with Yahoo Finance RSS/search fallback as supporting stock context before any Robinhood Chain quote preparation.";
   const cacheKey = stocks.map((stock) => `${stock.symbol}:${stock.secCik || ""}`).join("|");
   const ttlMs = cacheTtlMs();
   if (stockSignalsCache && stockSignalsCache.key === cacheKey && Date.now() - stockSignalsCache.ts < ttlMs) {
@@ -429,7 +558,7 @@ export async function fetchStockSignals(stocks = robinhoodStockTokens): Promise<
     Promise.all(stocks.map((stock) => fetchFiling(stock))),
     fetchNews(stocks)
   ]);
-  const timeoutMs = Number(env("STOCK_SIGNALS_TIMEOUT_MS", "12000")) || 12000;
+  const timeoutMs = Number(env("STOCK_SIGNALS_TIMEOUT_MS", "20000")) || 20000;
   const timer = new Promise<StockSignals>((resolve) => setTimeout(() => resolve(timeoutFallbacks(stocks)), timeoutMs));
   const result = await Promise.race([
     sourcePromise.then(([prices, filings, news]) => ({

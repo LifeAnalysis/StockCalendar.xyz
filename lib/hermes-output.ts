@@ -20,6 +20,7 @@ type OpenRouterChatResult = {
   model: string;
   reply: string | null;
   vote: LlmVote | null;
+  prompt_payload_bytes?: number;
   status?: number;
   error?: string;
   finish_reason?: string;
@@ -48,7 +49,7 @@ type LlmVote = {
 export const DEFAULT_HERMES_OUTPUT_PROMPT =
   "For Tesla, Amazon, Palantir, Netflix, and AMD, identify any Robinhood Chain stock-token quote worth preparing now. Use only the executed Hermes tool results as evidence and keep the wallet-signing boundary explicit.";
 
-const HERMES_SYSTEM_PROMPT_VERSION = "robinhood-chain-research-v3";
+const HERMES_SYSTEM_PROMPT_VERSION = "robinhood-chain-research-v5";
 
 function buildHermesSystemPrompt() {
   return [
@@ -56,12 +57,13 @@ function buildHermesSystemPrompt() {
     "The application has already executed the required tools before this chat call. Treat DATA_PIPELINE_JSON as authoritative tool results, not as suggestions.",
     "Do not claim to browse, search, call APIs, fetch filings, scan Kalshi, inspect explorer contracts, prepare quotes, sign transactions, or execute trades during this OpenRouter turn.",
     "Your job is to cast the final Hermes vote from the supplied tool results for a human who may decide whether to prepare a quote.",
-    "Use only DATA_PIPELINE_JSON for chain contracts, supporting market context, prices, filings, calendars, explorer confirmation, and source status.",
+    "Use only DATA_PIPELINE_JSON for chain contracts, supporting market context, prices, filings, calendars, explorer confirmation, source status, and supplied evidence.",
     "Route readiness and explorer confirmation are prerequisites, not confidence evidence. They can block a trade, but they must not increase confidence by themselves.",
-    "Stooq, Yahoo chart data, SEC EDGAR, GDELT, calendars, and Kalshi are supporting evidence for the final vote.",
+    "Stooq, Yahoo chart data, SEC EDGAR, GDELT/Yahoo news, MarketBeat calendars, and Kalshi are supporting evidence for the final vote.",
     "Kalshi website search pages are not a runtime data source. Use only public Trade API records included in DATA_PIPELINE_JSON and the local stock-term filter metadata.",
     "Every stock must receive one final action: BUY, WATCH, NO_BUY, or CONFIG_NEEDED. You may differ from the deterministic evidence score when the supplied evidence justifies it.",
     "BUY means quote preparation may be shown, not that Hermes can execute. WATCH and NO_BUY must not ask the user to sign.",
+    "BUY requires a clean matched Kalshi market with YES/NO pricing and meaningful market depth. If liquidity and volume are effectively zero or tiny, keep the stock at WATCH even when a ticker match exists.",
     "For quote prep, require exact source_asset, target_asset, wallet_address, amount, and chainId 46630.",
     "When YES/NO prices exist, explain what they support and include bid/ask values. When no clean market exists, say the absence clearly.",
     "If a source is degraded, say so directly and do not infer missing data.",
@@ -178,12 +180,97 @@ function buildVoteContext(intel: Awaited<ReturnType<typeof buildStockIntel>>) {
             }
           : null,
         news_count: evidence.news_count,
+        top_news: evidence.top_news?.slice(0, 4).map((article) => ({
+          title: clipText(article.title, 180),
+          url: article.url,
+          domain: article.domain
+        })) || [],
         calendar_ok: evidence.calendar_ok,
         earnings_dates: evidence.earnings_dates?.slice(0, 3) || [],
         rationale: clipText(recommendation.rationale, 650),
         user_action: clipText(recommendation.user_action, 350)
       };
     })
+  };
+}
+
+function buildOpenRouterDataPipeline(intel: Awaited<ReturnType<typeof buildStockIntel>>) {
+  return {
+    system_prompt_version: HERMES_SYSTEM_PROMPT_VERSION,
+    timestamp: intel.timestamp,
+    pipeline: intel.pipeline,
+    tool_execution_contract: {
+      model_role: "final_vote_from_supplied_tool_results_only",
+      app_executed_tools: [
+        "robinhood_chain_tokens",
+        "kalshi_public_markets",
+        "public_event_calendars",
+        "stooq_public_quotes",
+        "sec_edgar_filings",
+        "gdelt_news",
+        "explorer_stock_like_tokens"
+      ],
+      wallet_boundary: "quote_preparation_only_wallet_signature_required"
+    },
+    output_contract: {
+      reply_sections: ["Checked", "Final vote", "Why", "Next"],
+      source_policy: "Say that the app checked sources; do not imply the model browsed or called APIs directly.",
+      confidence_policy: "Route readiness and explorer confirmation are prerequisites, not confidence evidence.",
+      wallet_policy: "Quote preparation only; signing stays with the wallet owner."
+    },
+    source_results: {
+      robinhood_chain: {
+        stock_count: intel.robinhood_chain.stock_count,
+        payment_tokens: intel.robinhood_chain.payment_tokens,
+        stocks: intel.robinhood_chain.stocks,
+        source: intel.robinhood_chain.source
+      },
+      kalshi: {
+        ok: intel.kalshi.ok,
+        source: intel.kalshi.source,
+        error: intel.kalshi.error,
+        scanned_markets: intel.kalshi.scanned_markets,
+        search_method: intel.kalshi.search_method,
+        source_note: intel.kalshi.source_note,
+        searched_terms: intel.kalshi.searched_terms,
+        stocks: intel.kalshi.stocks.map((row) => ({
+          symbol: row.stock.symbol,
+          match_count: row.match_count,
+          markets: row.markets
+        }))
+      },
+      calendars: intel.calendars,
+      stock_signals: {
+        ok: intel.stock_signals.ok,
+        source_note: intel.stock_signals.source_note,
+        cached: intel.stock_signals.cached,
+        prices: intel.stock_signals.prices,
+        filings: intel.stock_signals.filings,
+        news: intel.stock_signals.news
+      },
+      explorer_discovery: {
+        ok: intel.explorer_discovery.ok,
+        source: intel.explorer_discovery.source,
+        searched_terms: intel.explorer_discovery.searched_terms,
+        stock_like_count: intel.explorer_discovery.stock_like_count,
+        official_count: intel.explorer_discovery.official_count,
+        other_count: intel.explorer_discovery.other_count,
+        official_tokens: intel.explorer_discovery.tokens.filter((token) => token.routed_by_agent || token.trust_level === "official"),
+        error: intel.explorer_discovery.error
+      }
+    },
+    deterministic_recommendations: intel.recommendations.map((recommendation) => ({
+      symbol: recommendation.symbol,
+      recommendation: recommendation.recommendation,
+      action: recommendation.action,
+      label: recommendation.label,
+      confidence: recommendation.confidence,
+      score_breakdown: recommendation.score_breakdown,
+      rationale: recommendation.rationale,
+      user_action: recommendation.user_action,
+      quote_requirements: recommendation.quote_requirements
+    })),
+    deterministic_decision: intel.hermes_decision
   };
 }
 
@@ -263,15 +350,18 @@ function buildOpenRouterDecision(vote: LlmVote, intel: Awaited<ReturnType<typeof
   const actionCounts = { BUY: 0, WATCH: 0, NO_BUY: 0, CONFIG_NEEDED: 0 };
   const stocks = intel.hermes_decision.stocks.map((stock) => {
     const llm = voteBySymbol.get(stock.symbol);
-    const action = llm?.action || stock.action;
+    const guardedBuy = llm?.action === "BUY" && stock.action !== "BUY";
+    const action = guardedBuy ? stock.action : llm?.action || stock.action;
     actionCounts[action] += 1;
     return {
       ...stock,
       action,
       label: labelForAction(action),
-      confidence: llm?.confidence ?? stock.confidence,
-      reason: llm?.reason || stock.reason,
-      user_action: llm?.user_action || stock.user_action
+      confidence: guardedBuy ? Math.min(llm?.confidence ?? stock.confidence, stock.confidence) : llm?.confidence ?? stock.confidence,
+      reason: guardedBuy
+        ? `${llm?.reason || stock.reason} Hermes kept this at ${stock.action} because the deterministic source-quality guard did not clear quote prep.`
+        : llm?.reason || stock.reason,
+      user_action: guardedBuy ? stock.user_action : llm?.user_action || stock.user_action
     };
   });
   return {
@@ -352,6 +442,72 @@ function buildStockReplies(decision: Awaited<ReturnType<typeof buildStockIntel>>
   );
 }
 
+function joinHumanList(items: string[]) {
+  if (items.length <= 1) return items.join("");
+  if (items.length === 2) return `${items[0]} and ${items[1]}`;
+  return `${items.slice(0, -1).join(", ")} and ${items[items.length - 1]}`;
+}
+
+function compactReason(value?: string, max = 210) {
+  const text = value?.replace(/\s+/g, " ").trim() || "";
+  if (!text) return "";
+  return text.length > max ? `${text.slice(0, max - 1).trim()}...` : text;
+}
+
+function formatShortDate(value?: string) {
+  if (!value) return "";
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) return value;
+  return date.toLocaleDateString("en-US", { month: "short", day: "numeric", timeZone: "UTC" });
+}
+
+function buildNiceReply(decision: Awaited<ReturnType<typeof buildStockIntel>>["hermes_decision"], intel: Awaited<ReturnType<typeof buildStockIntel>>) {
+  const recommendationBySymbol = new Map(intel.recommendations.map((recommendation) => [recommendation.symbol, recommendation]));
+  const buy = decision.stocks.filter((stock) => stock.action === "BUY");
+  const watch = decision.stocks.filter((stock) => stock.action === "WATCH");
+  const noBuy = decision.stocks.filter((stock) => stock.action === "NO_BUY");
+  const configNeeded = decision.stocks.filter((stock) => stock.action === "CONFIG_NEEDED");
+  const degraded = intel.pipeline.degraded_sources.length ? `\nSource note: Degraded source(s): ${intel.pipeline.degraded_sources.join(", ")}.` : "";
+
+  const buyLead = buy.length
+    ? buy.length === 1
+      ? `Call: Hermes thinks ${buy[0].symbol} is the only buy setup worth preparing now.`
+      : `Call: Hermes thinks ${joinHumanList(buy.map((stock) => stock.symbol))} are buy setups worth preparing now.`
+    : "Hermes does not see a clean buy setup worth preparing right now.";
+  const buyReasons = buy
+    .map((stock) => {
+      const recommendation = recommendationBySymbol.get(stock.symbol);
+      const pricing = recommendation?.evidence.market_pricing?.spread_note;
+      const quote = recommendation?.evidence.price_snapshot?.close ? `quote ${formatMoney(recommendation.evidence.price_snapshot.close)}` : "";
+      const filing = recommendation?.evidence.latest_filing
+        ? `SEC ${recommendation.evidence.latest_filing.form}${recommendation.evidence.latest_filing.filing_date ? ` ${formatShortDate(recommendation.evidence.latest_filing.filing_date)}` : ""}`
+        : "";
+      const earnings = recommendation?.evidence.earnings_dates?.[0] ? `earnings ${formatShortDate(recommendation.evidence.earnings_dates[0])}` : "";
+      const support = [pricing, quote, filing, earnings].filter(Boolean).join("; ");
+      return `${stock.symbol}: ${support || compactReason(stock.reason)}`;
+    })
+    .filter(Boolean);
+  const holdList = [...watch, ...noBuy, ...configNeeded];
+  const watchReason = watch.length
+    ? `Watch: ${joinHumanList(watch.map((stock) => stock.symbol))} ${watch.length === 1 ? "has" : "have"} route/context, but not enough conviction for quote prep.`
+    : "";
+  const noBuyReason = noBuy.length ? `No buy: ${joinHumanList(noBuy.map((stock) => stock.symbol))} should stay hidden from quote prep until evidence improves.` : "";
+  const configReason = configNeeded.length ? `Config needed: ${joinHumanList(configNeeded.map((stock) => stock.symbol))} needs source repair before any trade call.` : "";
+  const holdReason = holdList.length
+    ? `Why not the others: ${holdList.some((stock) => stock.action === "CONFIG_NEEDED") ? "one or more required sources need attention" : "the evidence is useful, but not clean enough for a wallet prompt."}`
+    : "";
+
+  return [
+    buyLead,
+    buyReasons.length ? `Why: ${buyReasons.join(" | ")}` : "",
+    holdReason,
+    watchReason,
+    noBuyReason,
+    configReason,
+    `Next: Prepare a quote only after you accept the evidence and confirm the wallet-signing step.${degraded}`
+  ].filter(Boolean).join("\n");
+}
+
 async function askHermes(message: string, intel: Awaited<ReturnType<typeof buildStockIntel>>): Promise<OpenRouterChatResult> {
   const apiKey = env("OPENROUTER_API_KEY");
   const model = env("OPENROUTER_MODEL", "deepseek/deepseek-v4-flash");
@@ -360,10 +516,11 @@ async function askHermes(message: string, intel: Awaited<ReturnType<typeof build
   }
 
   const maxTokens = Number(env("OPENROUTER_MAX_TOKENS", "1800"));
-  const timeoutMs = Number(env("OPENROUTER_TIMEOUT_MS", "45000"));
+  const timeoutMs = Number(env("OPENROUTER_TIMEOUT_MS", "90000"));
+  const dataPipelineJson = JSON.stringify(buildOpenRouterDataPipeline(intel));
   const response = await fetchJson<OpenRouterResponse>("https://openrouter.ai/api/v1/chat/completions", {
     method: "POST",
-    timeoutMs: Number.isFinite(timeoutMs) ? Math.max(10000, Math.trunc(timeoutMs)) : 45000,
+    timeoutMs: Number.isFinite(timeoutMs) ? Math.max(10000, Math.trunc(timeoutMs)) : 90000,
     headers: {
       Authorization: `Bearer ${apiKey}`,
       "HTTP-Referer": "https://hermes-agent-backend.vercel.app",
@@ -382,31 +539,7 @@ async function askHermes(message: string, intel: Awaited<ReturnType<typeof build
         },
         {
           role: "system",
-          content: `DATA_PIPELINE_JSON=${JSON.stringify({
-            system_prompt_version: HERMES_SYSTEM_PROMPT_VERSION,
-            timestamp: intel.timestamp,
-            pipeline: intel.pipeline,
-            tool_execution_contract: {
-              model_role: "final_vote_from_supplied_tool_results_only",
-              app_executed_tools: [
-                "robinhood_chain_tokens",
-                "kalshi_public_markets",
-                "public_event_calendars",
-                "stooq_public_quotes",
-                "sec_edgar_filings",
-                "gdelt_news",
-                "explorer_stock_like_tokens"
-              ],
-              wallet_boundary: "quote_preparation_only_wallet_signature_required"
-            },
-            output_contract: {
-              reply_sections: ["Checked", "Final vote", "Why", "Next"],
-              source_policy: "Say that the app checked sources; do not imply the model browsed or called APIs directly.",
-              confidence_policy: "Route readiness and explorer confirmation are prerequisites, not confidence evidence.",
-              wallet_policy: "Quote preparation only; signing stays with the wallet owner."
-            },
-            vote_context: buildVoteContext(intel)
-          })}`
+          content: `DATA_PIPELINE_JSON=${dataPipelineJson}`
         },
         { role: "user", content: message }
       ]
@@ -423,6 +556,7 @@ async function askHermes(message: string, intel: Awaited<ReturnType<typeof build
       model,
       reply,
       vote,
+      prompt_payload_bytes: dataPipelineJson.length,
       status: response.status,
       finish_reason: choice?.finish_reason,
       provider_model: response.data?.model,
@@ -435,6 +569,7 @@ async function askHermes(message: string, intel: Awaited<ReturnType<typeof build
     model,
     reply: null,
     vote: null,
+    prompt_payload_bytes: dataPipelineJson.length,
     status: response.status,
     error: safeOpenRouterError(response.data) || response.error || (response.ok ? "openrouter_invalid_or_empty_vote" : "openrouter_request_failed"),
     finish_reason: choice?.finish_reason,
@@ -450,8 +585,11 @@ export async function buildHermesOutput(message = DEFAULT_HERMES_OUTPUT_PROMPT, 
     const finalDecision = chat.vote ? buildOpenRouterDecision(chat.vote, intel) : intel.hermes_decision;
     const replySource = chat.vote ? "openrouter" : "fallback";
     const reply = chat.vote ? chat.vote.reply || decisionReply(finalDecision, intel) : fallbackReply(intel);
+    const niceReply = buildNiceReply(finalDecision, intel);
     return {
       reply,
+      nice_reply: niceReply,
+      text_output: niceReply,
       reply_source: replySource,
       vote_source: replySource,
       llm_vote: chat.vote,
@@ -473,6 +611,7 @@ export async function buildHermesOutput(message = DEFAULT_HERMES_OUTPUT_PROMPT, 
           configured: chat.configured,
           role: "final_vote_from_supplied_tool_results",
           model: chat.model,
+          prompt_payload_bytes: chat.prompt_payload_bytes,
           provider_model: chat.provider_model,
           status: chat.status,
           finish_reason: chat.finish_reason,
@@ -483,8 +622,11 @@ export async function buildHermesOutput(message = DEFAULT_HERMES_OUTPUT_PROMPT, 
     };
   } catch (error) {
     const messageText = error instanceof Error ? error.message : String(error);
+    const niceReply = `Hermes cannot produce a clean buy or no-buy read right now because output generation failed. Retry after checking OpenRouter, network endpoints, and required env vars. Detail: ${messageText || "unknown error"}`;
     return {
-      reply: `Hermes output not available right now. Retry after verifying runtime dependencies (OpenRouter, network endpoints, and required env vars). Detail: ${messageText || "unknown error"}`,
+      reply: niceReply,
+      nice_reply: niceReply,
+      text_output: niceReply,
       reply_source: "fallback",
       ui_brief_source: "data.recommendations",
       system_prompt_version: HERMES_SYSTEM_PROMPT_VERSION,

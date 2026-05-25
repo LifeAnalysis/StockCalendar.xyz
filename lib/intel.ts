@@ -9,6 +9,11 @@ function formatPrice(value?: number) {
   return `$${n.toFixed(n >= 100 ? 2 : 4)}`;
 }
 
+function parseMarketDollars(value?: string) {
+  const number = Number(value || 0);
+  return Number.isFinite(number) ? number : 0;
+}
+
 export function explainScoreBreakdown(components: ScoreComponent[], total: number) {
   const contributors = components
     .filter((component) => component.points > 0)
@@ -161,7 +166,7 @@ function buildPipelineChecks(
       name: "public_event_calendars",
       ok: calendars.every((calendar) => calendar.ok || calendar.public_links.length > 0),
       required: false,
-      source: "Yahoo Finance calendarEvents with public fallback links",
+      source: "MarketBeat earnings pages with Yahoo Finance and Nasdaq public fallback links",
       records: calendars.length,
       error: calendars
         .filter((calendar) => !calendar.ok && calendar.error)
@@ -190,7 +195,7 @@ function buildPipelineChecks(
       name: "gdelt_news",
       ok: stockSignals.news.some((row) => row.ok && row.article_count > 0),
       required: false,
-      source: "https://api.gdeltproject.org/api/v2/doc/doc",
+      source: "https://api.gdeltproject.org/api/v2/doc/doc + https://feeds.finance.yahoo.com/rss/2.0/headline",
       note: "Optional broad news pressure signal; ignored for BUY unless articles are returned cleanly.",
       records: stockSignals.news.reduce((count, row) => count + row.article_count, 0),
       error: stockSignals.news.filter((row) => !row.ok && row.error).map((row) => `${row.symbol}: ${row.error}`).join("; ") || undefined
@@ -367,8 +372,21 @@ function buildStockRecommendations(
     const explorerConfirmed = explorerDiscovery.tokens.some(
       (token) => token.routed_by_agent && token.address.toLowerCase() === stock.address.toLowerCase()
     );
+    const marketDepth = topMarket
+      ? Math.max(
+          parseMarketDollars(topMarket.liquidity_dollars),
+          parseMarketDollars(topMarket.volume_24h_fp),
+          parseMarketDollars(topMarket.volume_fp)
+        )
+      : 0;
+    const marketDepthOk = marketDepth >= 100;
+    const kalshiMarketPoints = topMarket
+      ? marketDepthOk
+        ? Math.min(topMarket.score * 5, 45)
+        : Math.min(topMarket.score, 15)
+      : 0;
     const scoreComponents: ScoreComponent[] = [
-      { key: "kalshi", label: "Kalshi market", points: topMarket ? Math.min(topMarket.score * 5, 45) : 0, max: 45, present: Boolean(topMarket) },
+      { key: "kalshi", label: "Kalshi market", points: kalshiMarketPoints, max: 45, present: Boolean(topMarket) },
       { key: "calendar", label: "Earnings calendar", points: calendar?.ok ? 15 : 0, max: 15, present: Boolean(calendar?.ok) },
       { key: "price", label: "Public quote", points: price?.ok ? 15 : 0, max: 15, present: Boolean(price?.ok) },
       { key: "filing", label: "SEC filing", points: filing?.ok && filing.latest_material ? 15 : 0, max: 15, present: Boolean(filing?.ok && filing.latest_material) },
@@ -384,7 +402,7 @@ function buildStockRecommendations(
       (news?.article_count || 0) > 0
     ].filter(Boolean).length;
     const recommendation: StockRecommendation["recommendation"] =
-      topMarket && stock.address && confidence >= 75
+      topMarket && marketDepthOk && stock.address && confidence >= 75
         ? "prepare_quote"
         : signalCount >= 2
           ? "watch"
@@ -599,9 +617,9 @@ export async function buildStockIntel(options: { bypassCache?: boolean } = {}) {
 async function computeStockIntel() {
   const [kalshi, calendars, explorerDiscovery, stockSignals] = await Promise.all([
     sourceTimeout(matchStockMarkets(robinhoodStockTokens), timeoutMs("KALSHI_SOURCE_TIMEOUT_MS", 30000), kalshiTimeoutFallback()),
-    sourceTimeout(fetchStockCalendars(robinhoodStockTokens), timeoutMs("CALENDAR_SOURCE_TIMEOUT_MS", 8000), calendarTimeoutFallback()),
+    sourceTimeout(fetchStockCalendars(robinhoodStockTokens), timeoutMs("CALENDAR_SOURCE_TIMEOUT_MS", 15000), calendarTimeoutFallback()),
     sourceTimeout(discoverExplorerStockTokens(), timeoutMs("EXPLORER_SOURCE_TIMEOUT_MS", 6000), explorerTimeoutFallback()),
-    sourceTimeout(fetchStockSignals(robinhoodStockTokens), timeoutMs("STOCK_SIGNALS_TIMEOUT_MS", 12000), stockSignalsTimeoutFallback())
+    sourceTimeout(fetchStockSignals(robinhoodStockTokens), timeoutMs("STOCK_SIGNALS_TIMEOUT_MS", 20000), stockSignalsTimeoutFallback())
   ]);
   const checks = buildPipelineChecks(kalshi, calendars, explorerDiscovery, stockSignals);
   const recommendations = buildStockRecommendations(kalshi, calendars, explorerDiscovery, stockSignals);

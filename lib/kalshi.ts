@@ -68,6 +68,7 @@ type MarketFeed = {
 let marketCache: CacheEntry<KalshiMarket[]> | null = null;
 let targetedMarketCache: CacheEntry<MarketFeed> | null = null;
 let seriesCache: CacheEntry<KalshiSeries[]> | null = null;
+let directSeriesCache: CacheEntry<Record<string, KalshiSeries | null>> | null = null;
 
 function kalshiBaseUrl(): string {
   return env("KALSHI_API_BASE_URL", KALSHI_BASE_URL).replace(/\/$/, "");
@@ -200,7 +201,9 @@ async function fetchKalshiSeries(): Promise<{
     return { ok: true, series: seriesCache.value };
   }
 
-  const response = await fetchJson<SeriesResponse>(`${kalshiBaseUrl()}/series?status=open`, { timeoutMs: 25000 });
+  const response = await fetchJson<SeriesResponse>(`${kalshiBaseUrl()}/series?status=open`, {
+    timeoutMs: Number(env("KALSHI_SOURCE_TIMEOUT_MS", "30000")) || 30000
+  });
   if (!response.ok || !response.data) {
     return { ok: false, series: [], error: response.error || JSON.stringify(response.data || {}) };
   }
@@ -297,6 +300,15 @@ function shouldScanSeries(): boolean {
   return env("KALSHI_USE_SERIES_SCAN", "true") !== "false";
 }
 
+function shouldScanSeriesCatalog(): boolean {
+  return env("KALSHI_USE_SERIES_CATALOG_SCAN", "false") === "true";
+}
+
+function maxSearchRequests(): number {
+  const value = Number(env("KALSHI_MAX_SEARCH_REQUESTS", "12"));
+  return Number.isFinite(value) ? Math.max(1, Math.min(Math.trunc(value), 32)) : 12;
+}
+
 async function mapWithConcurrency<T, R>(
   items: T[],
   concurrency: number,
@@ -332,6 +344,81 @@ async function fetchSeriesMarkets(series: KalshiSeries): Promise<KalshiMarket[]>
   return markets;
 }
 
+function stockSeriesTicker(stock: RobinhoodToken) {
+  return `KX${stock.symbol.toUpperCase()}`;
+}
+
+async function fetchDirectStockSeries(stocks: RobinhoodToken[]): Promise<{
+  series: KalshiSeries[];
+  errors: string[];
+}> {
+  const configuredTtl = Number(env("KALSHI_MARKET_CACHE_SECONDS", "180"));
+  const ttlMs = (Number.isFinite(configuredTtl) ? Math.max(0, configuredTtl) : 180) * 1000;
+  const cacheKey = stocks.map((stock) => stock.symbol).join("|");
+  const cacheValue = directSeriesCache && directSeriesCache.key === cacheKey && Date.now() - directSeriesCache.ts < ttlMs
+    ? directSeriesCache.value
+    : null;
+  const values: Record<string, KalshiSeries | null> = cacheValue ? { ...cacheValue } : {};
+  const missing = stocks.filter((stock) => !(stock.symbol in values));
+  const errors: string[] = [];
+
+  const responses = await mapWithConcurrency(missing, 4, async (stock) => {
+    const ticker = stockSeriesTicker(stock);
+    const response = await fetchJson<{ series?: KalshiSeries }>(`${kalshiBaseUrl()}/series/${ticker}`, {
+      timeoutMs: Number(env("KALSHI_SOURCE_TIMEOUT_MS", "30000")) || 30000
+    });
+    return { stock, ticker, response };
+  });
+
+  for (const { stock, ticker, response } of responses) {
+    if (response.ok && response.data?.series) {
+      values[stock.symbol] = response.data.series;
+    } else {
+      values[stock.symbol] = null;
+      const error = response.error || `status ${response.status}`;
+      if (!/not_found|404/i.test(error)) errors.push(`${ticker}: ${error}`);
+    }
+  }
+
+  directSeriesCache = { ts: Date.now(), value: values, key: cacheKey };
+  return {
+    series: Object.values(values).filter((series): series is KalshiSeries => Boolean(series)),
+    errors
+  };
+}
+
+async function fetchSearchMarkets(terms: string[]): Promise<{
+  markets: KalshiMarket[];
+  scanned_markets: number;
+  errors: string[];
+}> {
+  const marketsByTicker = new Map<string, KalshiMarket>();
+  const errors: string[] = [];
+  const termsToFetch = terms.slice(0, maxSearchRequests());
+  const responses = await mapWithConcurrency(termsToFetch, 4, async (term) => {
+    const params = new URLSearchParams({ limit: "100", status: "open", search: term });
+    return fetchJson<MarketsResponse>(`${kalshiBaseUrl()}/markets?${params.toString()}`, {
+      timeoutMs: Number(env("KALSHI_SOURCE_TIMEOUT_MS", "30000")) || 30000
+    });
+  });
+
+  for (const response of responses) {
+    if (!response.ok || !response.data) {
+      errors.push(response.error || `status ${response.status}`);
+      continue;
+    }
+    for (const market of response.data.markets || []) {
+      if (market.ticker) marketsByTicker.set(market.ticker, market);
+    }
+  }
+
+  return {
+    markets: Array.from(marketsByTicker.values()),
+    scanned_markets: Array.from(marketsByTicker.values()).length,
+    errors
+  };
+}
+
 async function fetchTargetedKalshiMarkets(stocks: RobinhoodToken[]): Promise<MarketFeed> {
   const searchedTerms = stockSearchQueries(stocks);
   const pageCount = targetedKalshiPages();
@@ -347,21 +434,29 @@ async function fetchTargetedKalshiMarkets(stocks: RobinhoodToken[]): Promise<Mar
   let scannedMarkets = 0;
   let seriesError = "";
   if (includeSeries) {
-    const seriesFeed = await fetchKalshiSeries();
-    seriesError = seriesFeed.error || "";
+    const directSeries = await fetchDirectStockSeries(stocks);
+    seriesError = directSeries.errors.join("; ");
     const seriesByTicker = new Map<string, KalshiSeries>();
-    for (const stock of stocks) {
-      const stockTerms = stockSearchQueries([stock]);
-      const matchedSeries = seriesFeed.series
-        .filter((series) => stockRelevantSeries(series))
-        .filter((series) => stockTerms.some((term) => seriesMatchesSearchTerm(series, term)))
-        .map((series) => ({ series, score: scoreSeries(stock, series) }))
-        .filter((item) => item.score > 0)
-        .sort((a, b) => b.score - a.score)
-        .slice(0, maxSeriesPerStock());
+    for (const series of directSeries.series) {
+      seriesByTicker.set(series.ticker, series);
+    }
 
-      for (const { series } of matchedSeries) {
-        seriesByTicker.set(series.ticker, series);
+    if (shouldScanSeriesCatalog()) {
+      const seriesFeed = await fetchKalshiSeries();
+      seriesError = [seriesError, seriesFeed.error || ""].filter(Boolean).join("; ");
+      for (const stock of stocks) {
+        const stockTerms = stockSearchQueries([stock]);
+        const matchedSeries = seriesFeed.series
+          .filter((series) => stockRelevantSeries(series))
+          .filter((series) => stockTerms.some((term) => seriesMatchesSearchTerm(series, term)))
+          .map((series) => ({ series, score: scoreSeries(stock, series) }))
+          .filter((item) => item.score > 0)
+          .sort((a, b) => b.score - a.score)
+          .slice(0, maxSeriesPerStock());
+
+        for (const { series } of matchedSeries) {
+          seriesByTicker.set(series.ticker, series);
+        }
       }
     }
 
@@ -371,6 +466,19 @@ async function fetchTargetedKalshiMarkets(stocks: RobinhoodToken[]): Promise<Mar
         scannedMarkets += 1;
         marketsByTicker.set(market.ticker, market);
       }
+    }
+  }
+
+  if (seriesError && marketsByTicker.size === 0) {
+    const searchFeed = await fetchSearchMarkets(searchedTerms);
+    for (const market of searchFeed.markets) {
+      marketsByTicker.set(market.ticker, market);
+    }
+    scannedMarkets += searchFeed.scanned_markets;
+    if (marketsByTicker.size > 0) {
+      seriesError = "";
+    } else if (searchFeed.errors.length) {
+      seriesError = `${seriesError}; Market search fallback error: ${searchFeed.errors.join("; ")}`;
     }
   }
 
@@ -390,7 +498,9 @@ async function fetchTargetedKalshiMarkets(stocks: RobinhoodToken[]): Promise<Mar
         source_note: seriesError ? `${KALSHI_SOURCE_NOTE} Series catalog error: ${seriesError}` : KALSHI_SOURCE_NOTE,
         searched_terms: searchedTerms
       };
-      targetedMarketCache = { ts: Date.now(), value, key: cacheKey };
+      if (value.markets.length > 0 || value.scanned_markets > 0) {
+        targetedMarketCache = { ts: Date.now(), value, key: cacheKey };
+      }
       return value;
     }
 
@@ -414,7 +524,9 @@ async function fetchTargetedKalshiMarkets(stocks: RobinhoodToken[]): Promise<Mar
     source_note: seriesError ? `${KALSHI_SOURCE_NOTE} Series catalog error: ${seriesError}` : KALSHI_SOURCE_NOTE,
     searched_terms: searchedTerms
   };
-  targetedMarketCache = { ts: Date.now(), value, key: cacheKey };
+  if (value.ok || value.markets.length > 0 || value.scanned_markets > 0) {
+    targetedMarketCache = { ts: Date.now(), value, key: cacheKey };
+  }
   return value;
 }
 

@@ -1360,6 +1360,29 @@ select {
   white-space: nowrap;
 }
 
+.hermes-nice-output {
+  display: grid;
+  gap: 8px;
+  border: 1px solid color-mix(in oklab, var(--foreground) 12%, var(--border));
+  background: color-mix(in oklab, var(--paper-strong) 76%, #ffffff);
+  padding: 14px;
+}
+
+.hermes-nice-output span {
+  color: var(--muted-foreground);
+  font-size: 12px;
+  font-weight: 900;
+  text-transform: uppercase;
+}
+
+.hermes-nice-output p {
+  margin: 0;
+  color: var(--foreground);
+  font-size: 15px;
+  line-height: 1.52;
+  white-space: pre-line;
+}
+
 .hermes-final-sections {
   display: grid;
   gap: 16px;

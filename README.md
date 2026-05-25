@@ -52,9 +52,9 @@ Hermes uses only machine-readable data sources that the backend can inspect dire
 - **Kalshi public Trade API:** open public market and series data, locally filtered against stock symbols and company names.
 - **Stooq:** public latest quote snapshots.
 - **Yahoo Chart:** historical OHLC chart ranges and earnings backtest price windows.
-- **Yahoo/public calendar links:** earnings date and estimate context where available.
+- **MarketBeat/public calendar links:** earnings date and estimate context where available.
 - **SEC EDGAR submissions:** recent material filings and filing document links.
-- **GDELT:** recent stock-related article counts and top titles.
+- **GDELT/Yahoo Finance RSS:** recent stock-related article counts and top titles.
 - **OpenRouter:** optional natural-language Hermes summaries and earnings-event analysis.
 
 Hermes does not use Kalshi website search pages as source data because those pages can be noisy, protected, or unrelated to stock-specific markets.
@@ -98,7 +98,7 @@ Most values have defaults, but production should provide real API keys and conta
 OPENROUTER_API_KEY=
 OPENROUTER_MODEL=deepseek/deepseek-v4-flash
 OPENROUTER_MAX_TOKENS=4096
-OPENROUTER_TIMEOUT_MS=45000
+OPENROUTER_TIMEOUT_MS=90000
 
 # Optional persistent cache for earnings backtests.
 DATABASE_URL=
@@ -116,9 +116,9 @@ KALSHI_MAX_SERIES_PER_STOCK=4
 KALSHI_TARGETED_MARKET_PAGES=0
 
 # Source-level timeouts.
-CALENDAR_SOURCE_TIMEOUT_MS=8000
+CALENDAR_SOURCE_TIMEOUT_MS=15000
 EXPLORER_SOURCE_TIMEOUT_MS=6000
-STOCK_SIGNALS_TIMEOUT_MS=12000
+STOCK_SIGNALS_TIMEOUT_MS=20000
 STOCK_SIGNALS_CACHE_SECONDS=300
 STOOQ_TIMEOUT_MS=6000
 YAHOO_CHART_TIMEOUT_MS=6000
@@ -126,8 +126,10 @@ YAHOO_CHART_RANGE=3mo
 YAHOO_CHART_INTERVAL=1d
 SEC_TIMEOUT_MS=8000
 SEC_USER_AGENT=hermes-agent-backend/2.0 your-email@example.com
-GDELT_TIMEOUT_MS=3000
+GDELT_TIMEOUT_MS=6000
 GDELT_MAX_RECORDS=25
+YAHOO_NEWS_TIMEOUT_MS=6000
+YAHOO_NEWS_COUNT=6
 
 # Robinhood Chain server-side RPC.
 ROBINHOOD_CHAIN_RPC_URL=https://robinhood-testnet.g.alchemy.com/v2/...
