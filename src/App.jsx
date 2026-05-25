@@ -303,6 +303,27 @@ function buildEvidenceItems({ stock, recommendation, price, filing, markets, cal
   ].filter(Boolean);
 }
 
+function buildHermesDecisionSummary({ stock, recommendation, decision }) {
+  const sourceDecision = recommendation || {
+    action: decision?.action || "NO_BUY",
+    confidence: decision?.confidence ?? 0,
+    rationale: decision?.reason || "No explicit Hermes rationale is available yet.",
+    user_action: "Refresh intel in a few seconds and try again."
+  };
+
+  const action = sourceDecision.action;
+  const confidence = sourceDecision.confidence || 0;
+  const reason = sourceDecision.rationale || sourceDecision.user_action || "No actionable signal yet.";
+  const nextStep = sourceDecision.user_action || "Keep the setup visible and monitor source updates.";
+
+  return {
+    title: `${stock.symbol} ${action} (${typeof confidence === "number" ? `${confidence}%` : confidence})`,
+    decision: recommendation ? "actionable" : "pending",
+    reason: `${reason}.`,
+    nextStep: nextStep
+  };
+}
+
 function EvidenceSummary({ items }) {
   if (!items.length) return <p className="detail-copy">Hermes has not returned stock-specific evidence yet.</p>;
   return (
@@ -383,13 +404,14 @@ function ResearchTabs({ stock, hermesOutput, activeTab, setActiveTab, backend })
     (token) => token.routed_by_agent && token.address?.toLowerCase() === stock.address?.toLowerCase()
   );
   const visibleChecks = intel?.pipeline?.checks || [];
-  const openrouterTrace = hermesOutput?.tool_trace?.find((item) => item.name === "openrouter_chat");
-  const openrouterDetail = openrouterTrace?.ok
-    ? "live"
-    : openrouterTrace?.configured
-      ? "fallback"
-      : "not configured";
   const evidenceItems = buildEvidenceItems({ stock, recommendation, price, filing, markets, calendar, news, officialExplorer });
+  const hermesSummary = buildHermesDecisionSummary({
+    stock,
+    recommendation,
+    decision: hermesOutput?.hermes_decision?.stocks?.find((item) => item.symbol === stock.symbol)
+  });
+  const degradedChecks = visibleChecks.filter((check) => !check.ok).length;
+  const healthyChecks = visibleChecks.filter((check) => check.ok).length;
   const tabs = [
     { id: "overview", label: "Overview" },
     { id: "markets", label: "Markets", count: markets.length },
@@ -420,11 +442,12 @@ function ResearchTabs({ stock, hermesOutput, activeTab, setActiveTab, backend })
             <div className="detail-grid">
               <DetailMetric label="Action" value={recommendation?.action || hermesOutput?.hermes_decision?.stocks?.find((item) => item.symbol === stock.symbol)?.action || "n/a"} />
               <DetailMetric label="Confidence" value={recommendation ? `${recommendation.confidence}%` : stock.score ? `${stock.score}/100` : "n/a"} />
-              <DetailMetric label="Contract" value={shortAddress(stock.address)} />
+              <DetailMetric label="Readiness" value={hermesSummary.decision === "actionable" ? "Ready for quote prep" : "Needs cleaner data"} />
               <DetailMetric label="Explorer" value={recommendation?.evidence?.explorer_confirmed || officialExplorer ? "confirmed" : "not confirmed"} />
             </div>
             <EvidenceSummary items={evidenceItems} />
-            {recommendation?.user_action ? <p className="detail-action">{recommendation.user_action}</p> : null}
+            <p className="detail-action">{hermesSummary.reason}</p>
+            <div className="source-note">Next step: {hermesSummary.nextStep}</div>
             <div className="source-links compact-links">
               <button type="button" onClick={() => navigator.clipboard?.writeText(stock.address)}>
                 Copy contract
@@ -441,24 +464,12 @@ function ResearchTabs({ stock, hermesOutput, activeTab, setActiveTab, backend })
                 <StatusPill label="Intel" ok={backend.intel} detail={backend.intel ? "loaded" : "fallback"} />
                 <StatusPill label="Trade" ok={backend.trade} detail={backend.trade ? "route ready" : "not ready"} />
                 <StatusPill label="Pipeline" ok={Boolean(intel?.pipeline?.ok)} detail={intel?.pipeline?.ok ? "clean" : "degraded"} />
-                <StatusPill label="OpenRouter" ok={Boolean(openrouterTrace?.ok)} detail={openrouterDetail} />
-                <StatusPill label="Brief" ok detail={hermesOutput?.ui_brief_source === "data.recommendations" ? "Hermes data" : "unknown"} />
               </div>
-              <div className="pipeline-list">
-                {visibleChecks.length ? (
-                  visibleChecks.map((check) => (
-                    <div className="pipeline-item" key={check.name}>
-                      <div>
-                        <strong>{check.name?.replaceAll("_", " ")}</strong>
-                        <span>{check.source}</span>
-                      </div>
-                      <b className={check.ok ? "ok" : "degraded"}>{check.ok ? `${check.records} records` : check.error || "unavailable"}</b>
-                    </div>
-                  ))
-                ) : (
-                  <div className="empty-compact">Source checks will appear after Hermes output loads.</div>
-                )}
-              </div>
+              <p className="detail-copy">
+                {visibleChecks.length
+                  ? `${degradedChecks || "No"} degraded checks. ${healthyChecks} checks are healthy.`
+                  : "Source health is loading."}
+              </p>
             </div>
           </div>
         ) : null}
@@ -559,16 +570,7 @@ function HermesOutputBar({ stock, hermesOutput }) {
   const score = Math.max(0, Math.min(stock.score || 0, 100));
   const decision = hermesOutput?.hermes_decision?.stocks?.find((item) => item.symbol === stock.symbol);
   const recommendation = hermesOutput?.data?.recommendations?.find((item) => item.symbol === stock.symbol);
-  const evidenceItems = buildEvidenceItems({
-    stock,
-    recommendation,
-    price: decision?.price,
-    filing: decision?.latest_filing ? { latest_material: decision.latest_filing } : null,
-    markets: [],
-    calendar: null,
-    news: null,
-    officialExplorer: null
-  });
+  const hermesSummary = buildHermesDecisionSummary({ stock, recommendation, decision });
   const stance = decision?.action || (score >= 72 ? "WATCH" : score >= 64 ? "WATCH" : "NO_BUY");
   return (
     <div className="cn-card score-card">
@@ -584,9 +586,7 @@ function HermesOutputBar({ stock, hermesOutput }) {
           <div style={{ width: `${decision?.confidence || score}%` }}></div>
         </div>
         <div className="score-note">
-          {evidenceItems.length
-            ? evidenceItems.slice(0, 3).map((item) => `${item.label}: ${item.value}`).join("  ")
-            : hermesOutput?.reply || `${stock.symbol} selected. Contract is ready for Robinhood testnet quote prep.`}
+          {hermesSummary ? `${hermesSummary.title} · ${hermesSummary.reason} Next: ${hermesSummary.nextStep}` : `Contract is ready for Robinhood testnet quote prep.`}
         </div>
       </div>
     </div>

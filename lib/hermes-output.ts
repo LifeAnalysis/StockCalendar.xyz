@@ -45,7 +45,9 @@ function buildHermesSystemPrompt() {
     "For quote prep, require exact source_asset, target_asset, wallet_address, amount, and chainId 46630.",
     "When YES/NO prices exist, explain what they support and include bid/ask values. When no clean market exists, say the absence clearly.",
     "If a source is degraded, say so directly and do not infer missing data.",
-    "Keep the answer concise: verdict, per-stock action, useful evidence, degraded source caveats, and the next wallet-boundary step."
+    "Keep the answer concise: verdict, per-stock action, useful evidence, degraded source caveats, and the next wallet-boundary step.",
+    "Do not describe internal tool execution, tool names, reasoning traces, confidence math, or model internals.",
+    "Do not show chain-of-thought. Return only a concise user-facing verdict."
   ].join(" ");
 }
 
@@ -66,27 +68,20 @@ function fallbackReply(intel: Awaited<ReturnType<typeof buildStockIntel>>) {
   const degraded = intel.pipeline.degraded_sources.length ? ` Degraded sources: ${intel.pipeline.degraded_sources.join(", ")}.` : "";
   const recommendations = decision.stocks
     .map((row) => {
-      const route = `official route ready`;
-      const price = row.price?.close
-        ? `price ${formatMoney(row.price.close)} close${row.price.date ? ` on ${row.price.date}` : ""}${row.price.volume ? `, ${formatVolume(row.price.volume)} volume` : ""}`
-        : "price source unavailable";
-      const filing = row.latest_filing
-        ? `SEC ${row.latest_filing.form}${row.latest_filing.filing_date ? ` filed ${row.latest_filing.filing_date}` : ""}`
-        : "no latest SEC filing returned";
-      const pricing = row.yes_no_prices
-        ? `Kalshi ${row.yes_no_prices.yes_bid || "n/a"}/${row.yes_no_prices.yes_ask || "n/a"} YES, ${row.yes_no_prices.no_bid || "n/a"}/${row.yes_no_prices.no_ask || "n/a"} NO`
-        : "no clean YES/NO market price";
-      return `- ${row.symbol}: ${row.action} (${row.confidence}%). ${route}; ${price}; ${filing}; ${pricing}. Next: ${row.user_action}`;
+      const reason = row.reason || "No clean evidence available right now.";
+      const route = row.latest_filing ? "route support exists" : "route status unknown";
+      const next = row.user_action;
+      return `${row.symbol}: ${row.action} (${row.confidence}%). ${route}. ${reason} Next step: ${next}`;
     })
     .join("\n");
-  const searched = intel.kalshi.searched_terms?.length ? ` Filtered Kalshi terms: ${intel.kalshi.searched_terms.join(", ")}.` : "";
+  const searched = intel.kalshi.searched_terms?.length ? ` Filtered terms: ${intel.kalshi.searched_terms.join(", ")}.` : "";
   return [
     `Verdict: ${decision.verdict}.`,
-    decision.summary,
+    `Summary: ${decision.summary}`,
     `Context: ${intel.robinhood_chain.stock_count} Robinhood Chain stock tokens, ${intel.robinhood_chain.payment_tokens.length} payment tokens, ${intel.kalshi.scanned_markets} public Kalshi markets fetched, ${intel.stock_signals.prices.filter((row) => row.ok).length} public quote snapshots, ${intel.stock_signals.filings.filter((row) => row.ok).length} SEC filing streams, and ${intel.calendars.length} public calendar feeds.${searched} Source policy: ${intel.hermes_decision.source_note}${degraded}`,
     "Per stock:",
     recommendations,
-    `Action: ${decision.user_action}`
+    `Next: ${decision.user_action}`
   ].join("\n");
 }
 
@@ -182,36 +177,80 @@ async function askHermes(message: string, intel: Awaited<ReturnType<typeof build
 }
 
 export async function buildHermesOutput(message = DEFAULT_HERMES_OUTPUT_PROMPT) {
-  const intel = await buildStockIntel();
-  const chat = await askHermes(message, intel);
-  const replySource = chat.reply ? "openrouter" : "fallback";
-  const reply = chat.reply || fallbackReply(intel);
-  return {
-    reply,
-    reply_source: replySource,
-    ui_brief_source: "data.recommendations",
-    system_prompt_version: HERMES_SYSTEM_PROMPT_VERSION,
-    hermes_decision: intel.hermes_decision,
-    data: intel,
-    tool_trace: [
-      {
-        name: "buildStockIntel",
-        ok: intel.ok,
-        role: "app_executed_tools",
-        degraded_sources: intel.pipeline.degraded_sources
+  try {
+    const intel = await buildStockIntel();
+    const chat = await askHermes(message, intel);
+    const replySource = chat.reply ? "openrouter" : "fallback";
+    const reply = chat.reply || fallbackReply(intel);
+    return {
+      reply,
+      reply_source: replySource,
+      ui_brief_source: "data.recommendations",
+      system_prompt_version: HERMES_SYSTEM_PROMPT_VERSION,
+      hermes_decision: intel.hermes_decision,
+      data: intel,
+      tool_trace: [
+        {
+          name: "buildStockIntel",
+          ok: intel.ok,
+          role: "app_executed_tools",
+          degraded_sources: intel.pipeline.degraded_sources
+        },
+        {
+          name: "openrouter_chat",
+          ok: chat.ok,
+          configured: chat.configured,
+          role: "summarize_tool_results",
+          model: chat.model,
+          provider_model: chat.provider_model,
+          status: chat.status,
+          finish_reason: chat.finish_reason,
+          error: chat.error,
+          usage: chat.usage
+        }
+      ]
+    };
+  } catch (error) {
+    const messageText = error instanceof Error ? error.message : String(error);
+    return {
+      reply: `Hermes output not available right now. Retry after verifying runtime dependencies (OpenRouter, network endpoints, and required env vars). Detail: ${messageText || "unknown error"}`,
+      reply_source: "fallback",
+      ui_brief_source: "data.recommendations",
+      system_prompt_version: HERMES_SYSTEM_PROMPT_VERSION,
+      hermes_decision: {
+        verdict: "No hermes verdict generated",
+        summary: "OpenRouter output composition failed before recommendations were finalized.",
+        source_note: "Fallback text is used when output building fails.",
+        action_counts: {
+          BUY: 0,
+          WATCH: 0,
+          NO_BUY: 0,
+          CONFIG_NEEDED: 0
+        },
+        user_action: "Retry the command after checking service health."
       },
-      {
-        name: "openrouter_chat",
-        ok: chat.ok,
-        configured: chat.configured,
-        role: "summarize_tool_results",
-        model: chat.model,
-        provider_model: chat.provider_model,
-        status: chat.status,
-        finish_reason: chat.finish_reason,
-        error: chat.error,
-        usage: chat.usage
-      }
-    ]
-  };
+      data: {
+        ok: false,
+        timestamp: new Date().toISOString(),
+        error: messageText
+      },
+      tool_trace: [
+        {
+          name: "buildStockIntel",
+          ok: false,
+          role: "app_executed_tools",
+          degraded_sources: [],
+          error: messageText
+        },
+        {
+          name: "openrouter_chat",
+          ok: false,
+          configured: false,
+          role: "summarize_tool_results",
+          model: env("OPENROUTER_MODEL", "deepseek/deepseek-v4-flash"),
+          error: messageText
+        }
+      ]
+    };
+  }
 }
