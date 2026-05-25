@@ -960,6 +960,9 @@ function App() {
         onSelect={(item) => selectToken("pay", item)}
         onClose={() => setTokenPicker(null)}
       />
+      <footer className="app-footer">
+        Built by <span>LifeAnalysis</span> · Built by <a href="https://twitter.com/kuerax" target="_blank" rel="noreferrer">@kuerax on Twitter</a>
+      </footer>
     </>
   );
 }

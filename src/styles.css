@@ -1819,6 +1819,21 @@ select {
   align-items: center;
 }
 
+.app-footer {
+  max-width: 1440px;
+  margin: 8px auto 12px;
+  padding: 0 14px;
+  font-size: 11px;
+  color: var(--muted-foreground);
+  text-align: center;
+}
+
+.app-footer a {
+  color: var(--primary);
+  text-decoration: underline;
+  text-underline-offset: 2px;
+}
+
 @media (max-width: 1080px) {
   .workspace,
   .workspace:not(.revealed) {
@@ -1895,4 +1910,9 @@ select {
     text-align: left;
   }
 
+  .app-footer {
+    margin-top: 4px;
+    padding: 0 12px 6px;
+    text-align: left;
+  }
 }
