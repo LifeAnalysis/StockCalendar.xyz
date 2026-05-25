@@ -5,7 +5,10 @@ import Providers from "./providers";
 
 export const metadata: Metadata = {
   title: "Hermes Robinhood Chain",
-  description: "Kalshi and market-intelligence command center for Robinhood Chain stock tokens"
+  description: "Kalshi and market-intelligence command center for Robinhood Chain stock tokens",
+  icons: {
+    icon: [{ url: "/media/icons/hermes-thinking.webm", type: "video/webm" }]
+  }
 };
 
 export default async function RootLayout({ children }: { children: React.ReactNode }) {

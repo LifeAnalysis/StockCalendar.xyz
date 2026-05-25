@@ -206,7 +206,7 @@ function MotionAsset({ src, webmSrc, className }) {
       aria-hidden="true"
     >
       {webmSrc ? <source src={webmSrc} type="video/webm" /> : null}
-      <source src={src} type="video/mp4" />
+      {src ? <source src={src} type="video/mp4" /> : null}
     </video>
   );
 }
@@ -552,7 +552,7 @@ function HermesOutputBar({ stock, hermesOutput, loading, progress }) {
             </div>
           </div>
           <div className="score-reasoning">
-            <span>{loading ? "Hermes model running" : "Reasoning"}</span>
+            <span>{loading ? "Hermes model running" : "Hermes Reasoning"}</span>
             <div className="reasoning-point-list">
               {reasoningPoints.length ? reasoningPoints.map((point) => <p key={point}>{point}</p>) : <p>{reasoning}</p>}
             </div>
@@ -830,10 +830,6 @@ function EarningsBacktestTable({ stock, backtest, loading }) {
           ) : (
             <p className="module-empty">No backtest rows returned for {stock?.symbol || "this stock"}.</p>
           )}
-          <div className="source-footnote">
-            <span>Sources</span>
-            <p>Yahoo Chart OHLC, GDELT event-window headlines, Kalshi public markets, and OpenRouter analysis.</p>
-          </div>
         </>
       ) : null}
     </section>
@@ -944,6 +940,7 @@ function ConfidenceDecomposition({ stock, hermesOutput }) {
     <div data-slot="card" data-size="default" className="cn-card confidence-panel confidence-breakdown-card">
       <div data-slot="card-content" className="cn-card-content confidence-breakdown-content">
         <div className="confidence-breakdown-head">
+          <MotionAsset webmSrc="/media/icons/hermes-thinking.webm" className="score-heading-motion" />
           <span className="text-3xl font-semibold">{total}/100</span>
         </div>
         <div className="confidence-category-stack">
@@ -1018,6 +1015,7 @@ function PredictionMarketOverlay({ stock, hermesOutput }) {
       <div className="module-head prediction-head">
         <div>
           <h3 className="kalshi-market-title">
+            <MotionAsset webmSrc="/media/icons/hermes-additional-icon.webm" className="kalshi-heading-motion" />
             <img src="/logos/kalshilogopng.png" alt="Kalshi" />
             <span>markets</span>
           </h3>

@@ -651,6 +651,11 @@ select {
   gap: 8px;
 }
 
+.wallet-connect-row .wallet-actions {
+  width: 100%;
+  justify-content: space-between;
+}
+
 .wallet-address-button,
 .wallet-link-button,
 .network-row button {
@@ -665,7 +670,7 @@ select {
 }
 
 .wallet-address-button {
-  text-align: right;
+  text-align: left;
 }
 
 .connect-wallet-button {
@@ -876,11 +881,11 @@ select {
 }
 
 .stock-card {
-  min-height: 56px;
+  min-height: 44px;
   border: 1px solid var(--border);
   border-radius: var(--radius);
   background: #ffffff;
-  padding: 8px;
+  padding: 6px;
   display: grid;
   grid-template-columns: minmax(0, 1fr);
   gap: 8px;
@@ -901,7 +906,7 @@ select {
   grid-template-columns: minmax(0, 1fr);
   align-items: center;
   justify-items: stretch;
-  gap: 8px;
+  gap: 4px;
 }
 
 .stock-card:hover,
@@ -1204,14 +1209,14 @@ select {
 .score-radial {
   --primary: #ccff00;
   width: 320px;
-  height: 208px;
+  height: 176px;
   flex: 0 0 320px;
   overflow: hidden;
   color: var(--foreground);
 }
 
 .score-radial svg {
-  transform: translateY(-4px) scale(1.2);
+  transform: translateY(-12px) scale(1.2);
   transform-origin: center center;
 }
 
@@ -1303,6 +1308,14 @@ select {
   height: 30px;
   flex: 0 0 30px;
   border-radius: 50%;
+  object-fit: cover;
+}
+
+.score-heading-motion {
+  width: 34px;
+  height: 34px;
+  flex: 0 0 34px;
+  border-radius: 0;
   object-fit: cover;
 }
 
@@ -1775,11 +1788,14 @@ select {
 .reasoning-node-panel a {
   width: fit-content;
   margin-top: auto;
-  border: 1px solid var(--foreground);
-  background: var(--foreground);
-  color: #ffffff;
-  padding: 7px 9px;
+  border: 0;
+  background: transparent;
+  color: var(--foreground);
+  padding: 0;
   font-size: 12px;
+  font-weight: 850;
+  text-decoration: underline;
+  text-underline-offset: 3px;
 }
 
 .reasoning-graph-legend {
@@ -1835,8 +1851,9 @@ select {
 
 .confidence-breakdown-head {
   display: flex;
-  flex-direction: column;
-  gap: 4px;
+  align-items: center;
+  flex-direction: row;
+  gap: 8px;
 }
 
 .confidence-category-stack {
@@ -1968,11 +1985,19 @@ select {
 
 .kalshi-market-title {
   display: flex;
-  align-items: baseline;
-  gap: 4px;
+  align-items: center;
+  gap: 6px;
   font-size: 28px;
   font-weight: 400;
   line-height: 1;
+}
+
+.kalshi-heading-motion {
+  width: 34px;
+  height: 34px;
+  flex: 0 0 34px;
+  border-radius: 0;
+  object-fit: cover;
 }
 
 .kalshi-market-title img {
@@ -3214,7 +3239,7 @@ select {
 
 .kalshi-market-title {
   align-items: center;
-  gap: 4px;
+  gap: 6px;
   font-size: 26px;
   line-height: 1;
 }
@@ -3269,11 +3294,11 @@ select {
   }
 
   .stock-card {
-    min-height: 62px;
+    min-height: 44px;
   }
 
   .stock-select {
-    padding: 6px 3px;
+    padding: 2px;
   }
 
   .stock-top {
@@ -3330,7 +3355,7 @@ select {
 
   .score-radial {
     width: min(100%, 320px);
-    height: 208px;
+    height: 176px;
     flex-basis: auto;
   }
 

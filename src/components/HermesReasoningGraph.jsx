@@ -66,8 +66,8 @@ function NodeDetailPanel({ node }) {
         </div>
       ) : null}
       {node?.href ? (
-        <a href={node.href} target="_blank" rel="noreferrer">
-          Open source
+        <a className="reasoning-source-link" href={node.href} target="_blank" rel="noreferrer">
+          Source
         </a>
       ) : null}
     </aside>
@@ -120,6 +120,41 @@ function addEdge(edges, source, target, label, polarity = "neutral") {
       label,
       polarity
     }
+  });
+}
+
+function positionGraphNodes(nodes) {
+  const peripheralNodes = nodes.filter((node) => node.data.id !== "decision");
+  const compactSlots = [
+    { x: 0, y: -135 },
+    { x: 250, y: -78 },
+    { x: 250, y: 78 },
+    { x: 0, y: 135 },
+    { x: -250, y: 78 },
+    { x: -250, y: -78 },
+    { x: 128, y: -135 },
+    { x: -128, y: 135 },
+    { x: 128, y: 135 },
+    { x: -128, y: -135 }
+  ];
+
+  return nodes.map((node) => {
+    if (node.data.id === "decision") {
+      return { ...node, position: { x: 0, y: 0 } };
+    }
+
+    const nodeIndex = peripheralNodes.findIndex((item) => item.data.id === node.data.id);
+    const slot = compactSlots[nodeIndex];
+    if (slot) return { ...node, position: slot };
+
+    const angle = -Math.PI / 2 + (nodeIndex / Math.max(peripheralNodes.length, 1)) * Math.PI * 2;
+    return {
+      ...node,
+      position: {
+        x: Math.cos(angle) * 250,
+        y: Math.sin(angle) * 135
+      }
+    };
   });
 }
 
@@ -270,7 +305,7 @@ function buildGraph(stock, hermesOutput, loading) {
     });
   }
 
-  return { nodes, edges, selected: nodes.find((node) => node.data.id === "decision")?.data || nodes[0]?.data };
+  return { nodes: positionGraphNodes(nodes), edges, selected: nodes.find((node) => node.data.id === "decision")?.data || nodes[0]?.data };
 }
 
 export function HermesReasoningGraph({ stock, hermesOutput, loading }) {
@@ -363,21 +398,17 @@ export function HermesReasoningGraph({ stock, hermesOutput, loading }) {
         }
       ],
       layout: {
-        name: "grid",
+        name: "preset",
         animate: false,
-        avoidOverlap: true,
-        avoidOverlapPadding: 24,
         fit: true,
-        padding: 44,
-        condense: true,
-        rows: Math.ceil(Math.sqrt(graph.nodes.length))
+        padding: 88
       }
     });
 
     const centerGraph = () => {
       cy.resize();
       if (cy.elements().length) {
-        cy.fit(cy.elements(), 48);
+        cy.fit(cy.elements(), 88);
       }
     };
     const initialNode = cy.getElementById(graph.selected?.id || "decision");
@@ -413,7 +444,7 @@ export function HermesReasoningGraph({ stock, hermesOutput, loading }) {
 
   const resetGraph = React.useCallback(() => {
     if (!cyRef.current) return;
-    cyRef.current.fit(cyRef.current.elements(), 48);
+    cyRef.current.fit(cyRef.current.elements(), 88);
   }, []);
 
   return (
