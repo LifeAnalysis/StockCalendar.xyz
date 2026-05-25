@@ -3,6 +3,38 @@ import { matchStockMarkets } from "./kalshi";
 import { discoverExplorerStockTokens, robinhoodPaymentTokens, robinhoodStockTokens } from "./robinhood";
 import { fetchStockSignals } from "./stock-signals";
 
+function formatPrice(value?: number) {
+  if (!Number.isFinite(value)) return "n/a";
+  const n = Number(value);
+  return `$${n.toFixed(n >= 100 ? 2 : 4)}`;
+}
+
+export function explainScoreBreakdown(components: ScoreComponent[], total: number) {
+  const contributors = components
+    .filter((component) => component.points > 0)
+    .sort((a, b) => b.points - a.points);
+  const missing = components.filter((component) => !component.present || component.points === 0);
+  if (!contributors.length) {
+    return `Score ${total}/100 — no scored signal cleared its threshold; every component is missing.`;
+  }
+  const joinList = (items: string[]) => {
+    if (items.length <= 1) return items.join("");
+    if (items.length === 2) return `${items[0]} and ${items[1]}`;
+    return `${items.slice(0, -1).join(", ")} and ${items[items.length - 1]}`;
+  };
+  const fmt = (component: ScoreComponent) => `${component.label} (+${component.points})`;
+  const lead = contributors.slice(0, 2).map(fmt);
+  const rest = contributors.slice(2).map(fmt);
+  let contributorPhrase = `led by ${joinList(lead)}`;
+  if (rest.length) {
+    contributorPhrase += `, plus ${joinList(rest)}`;
+  }
+  const missingPhrase = missing.length
+    ? ` ${joinList(missing.map((component) => component.label))} ${missing.length === 1 ? "is" : "are"} missing.`
+    : "";
+  return `Score ${total}/100 — ${contributorPhrase}.${missingPhrase}`;
+}
+
 type PipelineCheck = {
   name: string;
   ok: boolean;
@@ -15,12 +47,21 @@ type PipelineCheck = {
 
 type DecisionAction = "BUY" | "WATCH" | "NO_BUY" | "CONFIG_NEEDED";
 
+type ScoreComponent = {
+  key: string;
+  label: string;
+  points: number;
+  max: number;
+  present: boolean;
+};
+
 type StockRecommendation = {
   symbol: string;
   recommendation: "prepare_quote" | "watch" | "wait_for_cleaner_data";
   action: DecisionAction;
   label: string;
   confidence: number;
+  score_breakdown: ScoreComponent[];
   rationale: string;
   user_action: string;
   evidence: {
@@ -80,6 +121,8 @@ type HermesDecision = {
     action: DecisionAction;
     label: string;
     confidence: number;
+    score_breakdown: ScoreComponent[];
+    score_explanation: string;
     reason: string;
     routeable: boolean;
     kalshi_match: boolean;
@@ -324,15 +367,15 @@ function buildStockRecommendations(
     const explorerConfirmed = explorerDiscovery.tokens.some(
       (token) => token.routed_by_agent && token.address.toLowerCase() === stock.address.toLowerCase()
     );
-    const confidence = Math.min(
-      95,
-      (topMarket ? Math.min(topMarket.score * 5, 45) : 0) +
-        (calendar?.ok ? 15 : 0) +
-        (price?.ok ? 15 : 0) +
-        (filing?.ok && filing.latest_material ? 15 : 0) +
-        Math.min((news?.article_count || 0) * 2, 10) +
-        Math.min((marketRow?.match_count || 0) * 2, 10)
-    );
+    const scoreComponents: ScoreComponent[] = [
+      { key: "kalshi", label: "Kalshi market", points: topMarket ? Math.min(topMarket.score * 5, 45) : 0, max: 45, present: Boolean(topMarket) },
+      { key: "calendar", label: "Earnings calendar", points: calendar?.ok ? 15 : 0, max: 15, present: Boolean(calendar?.ok) },
+      { key: "price", label: "Public quote", points: price?.ok ? 15 : 0, max: 15, present: Boolean(price?.ok) },
+      { key: "filing", label: "SEC filing", points: filing?.ok && filing.latest_material ? 15 : 0, max: 15, present: Boolean(filing?.ok && filing.latest_material) },
+      { key: "news", label: "News (GDELT)", points: Math.min((news?.article_count || 0) * 2, 10), max: 10, present: (news?.article_count || 0) > 0 },
+      { key: "matches", label: "Market matches", points: Math.min((marketRow?.match_count || 0) * 2, 10), max: 10, present: (marketRow?.match_count || 0) > 0 }
+    ];
+    const confidence = Math.min(95, scoreComponents.reduce((sum, component) => sum + component.points, 0));
     const signalCount = [
       topMarket,
       calendar?.ok,
@@ -390,7 +433,7 @@ function buildStockRecommendations(
         }
       : undefined;
     const support = [
-      priceSnapshot?.close ? `public quote close $${priceSnapshot.close}${priceSnapshot.date ? ` on ${priceSnapshot.date}` : ""}${priceSnapshot.volume ? ` with ${priceSnapshot.volume.toLocaleString("en-US")} volume` : ""}` : "",
+      priceSnapshot?.close ? `public quote close ${formatPrice(priceSnapshot.close)}${priceSnapshot.date ? ` on ${priceSnapshot.date}` : ""}${priceSnapshot.volume ? ` with ${priceSnapshot.volume.toLocaleString("en-US")} volume` : ""}` : "",
       latestFiling ? `SEC ${latestFiling.form}${latestFiling.filing_date ? ` filed ${latestFiling.filing_date}` : ""}` : "",
       news?.article_count ? `${news.article_count} recent GDELT article(s)` : "",
       marketPricing ? `Kalshi ${marketPricing.spread_note}` : ""
@@ -418,6 +461,7 @@ function buildStockRecommendations(
       action,
       label,
       confidence,
+      score_breakdown: scoreComponents,
       rationale,
       user_action: userAction,
       evidence: {
@@ -503,6 +547,8 @@ function buildHermesDecision(
       action: recommendation.action,
       label: recommendation.label,
       confidence: recommendation.confidence,
+      score_breakdown: recommendation.score_breakdown,
+      score_explanation: explainScoreBreakdown(recommendation.score_breakdown, recommendation.confidence),
       reason: recommendation.rationale,
       routeable: true,
       kalshi_match: recommendation.evidence.kalshi_match_count > 0,

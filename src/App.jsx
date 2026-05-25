@@ -439,6 +439,37 @@ function decorateStock(item, index, recommendation, price) {
   };
 }
 
+// Pure presentation helper mirroring lib/intel.ts explainScoreBreakdown.
+// Reimplemented here (not imported) because lib/intel.ts pulls server-only
+// modules (calendar/kalshi/robinhood/stock-signals) into its import graph,
+// which we don't want in the client bundle. No source weights are hardcoded —
+// they all come from the component data passed in.
+function buildScoreSentence(components, total) {
+  const contributors = components
+    .filter((component) => component.points > 0)
+    .sort((a, b) => b.points - a.points);
+  const missing = components.filter((component) => !component.present || component.points === 0);
+  if (!contributors.length) {
+    return `Score ${total}/100 — no scored signal cleared its threshold; every component is missing.`;
+  }
+  const joinList = (items) => {
+    if (items.length <= 1) return items.join("");
+    if (items.length === 2) return `${items[0]} and ${items[1]}`;
+    return `${items.slice(0, -1).join(", ")} and ${items[items.length - 1]}`;
+  };
+  const fmt = (component) => `${component.label} (+${component.points})`;
+  const lead = contributors.slice(0, 2).map(fmt);
+  const rest = contributors.slice(2).map(fmt);
+  let contributorPhrase = `led by ${joinList(lead)}`;
+  if (rest.length) {
+    contributorPhrase += `, plus ${joinList(rest)}`;
+  }
+  const missingPhrase = missing.length
+    ? ` ${joinList(missing.map((component) => component.label))} ${missing.length === 1 ? "is" : "are"} missing.`
+    : "";
+  return `Score ${total}/100 — ${contributorPhrase}.${missingPhrase}`;
+}
+
 function HermesOutputBar({ stock, hermesOutput, loading, progress }) {
   const score = Math.max(0, Math.min(stock.score || 0, 100));
   const decision = hermesOutput?.hermes_decision?.stocks?.find((item) => item.symbol === stock.symbol);
@@ -480,11 +511,63 @@ function HermesOutputBar({ stock, hermesOutput, loading, progress }) {
   const reasoningPoints = splitReasoningText(reasoning);
   const voteSource = hermesOutput?.vote_source === "openrouter" && llmStockVote ? "OpenRouter vote" : "Deterministic vote";
   const nextStep = llmStockVote?.user_action || decision?.user_action;
+  const scoreBreakdown = Array.isArray(decision?.score_breakdown) ? decision.score_breakdown : [];
+  const scoreExplanation = decision?.score_explanation;
+
+  // --- Adjust-bias controls (client-side re-score only, zero API/LLM) ---
+  // Weights are keyed by stock symbol so switching the selected stock never
+  // bleeds one stock's bias into another.
+  const symbol = stock.symbol;
+  const [biasOpen, setBiasOpen] = React.useState(false);
+  const [biasState, setBiasState] = React.useState({});
+  const stockBias = biasState[symbol] || { weights: {}, overlay: true };
+  const weights = stockBias.weights;
+  const overlayOn = stockBias.overlay !== false;
+
+  const setWeight = (key, value) => {
+    setBiasState((prev) => {
+      const current = prev[symbol] || { weights: {}, overlay: true };
+      return {
+        ...prev,
+        [symbol]: { ...current, weights: { ...current.weights, [key]: value } },
+      };
+    });
+  };
+  const setOverlay = (value) => {
+    setBiasState((prev) => {
+      const current = prev[symbol] || { weights: {}, overlay: true };
+      return { ...prev, [symbol]: { ...current, overlay: value } };
+    });
+  };
+  const resetBias = () => {
+    setBiasState((prev) => ({ ...prev, [symbol]: { weights: {}, overlay: true } }));
+  };
+
+  const weightFor = (key) => {
+    const w = weights[key];
+    return typeof w === "number" ? w : 1;
+  };
+  const adjustedBreakdown = scoreBreakdown.map((component) => ({
+    ...component,
+    points: Math.round((component.points || 0) * weightFor(component.key)),
+  }));
+  const adjustedTotal = Math.min(
+    95,
+    adjustedBreakdown.reduce((sum, component) => sum + component.points, 0),
+  );
+  const biasDirty =
+    scoreBreakdown.some((component) => weightFor(component.key) !== 1) || !overlayOn;
+  const weightsDirty = scoreBreakdown.some((component) => weightFor(component.key) !== 1);
+  const adjustedSentence = buildScoreSentence(adjustedBreakdown, adjustedTotal);
+  // When weights are dirty use the live adjusted view; otherwise keep Phase 1 data verbatim.
+  const displayBreakdown = weightsDirty ? adjustedBreakdown : scoreBreakdown;
+  const headlineSentence = weightsDirty ? adjustedSentence : scoreExplanation;
+
   return (
     <div className="cn-card score-card">
       <div className="cn-card-content">
         <div className="score-head">
-          <div className="score-left">
+          <div className={`score-left ${overlayOn ? "" : "score-left-overlay-off"}`}>
             <div className="score-radial" aria-label={`Hermes confidence ${displayScore}%`}>
             <svg cx="50%" cy="50%" role="application" tabIndex="0" className="recharts-surface" width="282" height="180" viewBox="0 0 282 180" style={{ width: "100%", height: "100%", display: "block" }}>
               <title></title>
@@ -542,7 +625,8 @@ function HermesOutputBar({ stock, hermesOutput, loading, progress }) {
             </svg>
             </div>
             <div className="score-copy">
-              <button className="score-action-pill" type="button" disabled={loading}>
+              <span className="score-why-label">{overlayOn ? "Hermes vote" : "Hermes vote · off"}</span>
+              <button className="score-action-pill" type="button" disabled={loading || !overlayOn}>
                 <span key={stance} className={loading ? "rotating-word" : ""}>{stance}</span>
               </button>
             </div>
@@ -552,6 +636,87 @@ function HermesOutputBar({ stock, hermesOutput, loading, progress }) {
               <span>{loading ? "Hermes model running" : "Hermes Reasoning"}</span>
               {!loading ? <small>{voteSource}</small> : null}
             </div>
+            {!loading && scoreBreakdown.length ? (
+              <div className="score-why">
+                <div className="score-why-headline">
+                  <span className="score-why-label">Evidence score · rule-based tally</span>
+                  <span className="score-why-total">
+                    Evidence score {weightsDirty ? adjustedTotal : decision?.confidence ?? adjustedTotal}/100
+                    {weightsDirty ? <small className="score-why-adjusted">· adjusted</small> : null}
+                  </span>
+                </div>
+                {headlineSentence ? <p className="score-why-sentence">{headlineSentence}</p> : null}
+                <div className="score-why-chips">
+                  {displayBreakdown.map((component) => (
+                    <div
+                      className={`score-why-chip ${component.present && component.points > 0 ? "" : "score-why-chip-empty"}`}
+                      key={component.key}
+                    >
+                      <span className="score-why-chip-label">{component.label}</span>
+                      <span className="score-why-chip-points">
+                        {component.points > 0 ? `+${component.points}` : "0"} / {component.max}
+                      </span>
+                    </div>
+                  ))}
+                </div>
+                <button
+                  type="button"
+                  className={`score-bias-toggle ${biasDirty ? "score-bias-toggle-active" : ""}`}
+                  onClick={() => setBiasOpen((open) => !open)}
+                  aria-expanded={biasOpen}
+                >
+                  {biasOpen ? "Hide bias controls" : "Adjust bias"}
+                  {biasDirty && !biasOpen ? <span className="score-bias-dot" aria-hidden="true" /> : null}
+                </button>
+                {biasOpen ? (
+                  <div className="score-bias-panel">
+                    <div className="score-bias-row score-bias-overlay">
+                      <label className="score-bias-overlay-label">
+                        <input
+                          type="checkbox"
+                          checked={overlayOn}
+                          onChange={(event) => setOverlay(event.target.checked)}
+                        />
+                        <span>Hermes overlay</span>
+                      </label>
+                      <button type="button" className="score-bias-reset" onClick={resetBias} disabled={!biasDirty}>
+                        Reset
+                      </button>
+                    </div>
+                    <div className="score-bias-sliders">
+                      {scoreBreakdown.map((component) => {
+                        const disabled = !component.present || component.points <= 0;
+                        const w = weightFor(component.key);
+                        const adjusted = Math.round((component.points || 0) * w);
+                        return (
+                          <div
+                            className={`score-bias-slider ${disabled ? "score-bias-slider-disabled" : ""}`}
+                            key={component.key}
+                          >
+                            <div className="score-bias-slider-head">
+                              <span className="score-bias-slider-label">{component.label}</span>
+                              <span className="score-bias-slider-meta">
+                                {w.toFixed(1)}× → +{adjusted}
+                              </span>
+                            </div>
+                            <input
+                              type="range"
+                              min="0"
+                              max="2"
+                              step="0.1"
+                              value={w}
+                              disabled={disabled}
+                              onChange={(event) => setWeight(component.key, Number(event.target.value))}
+                              aria-label={`${component.label} trust weight`}
+                            />
+                          </div>
+                        );
+                      })}
+                    </div>
+                  </div>
+                ) : null}
+              </div>
+            ) : null}
             <div className="reasoning-point-list">
               {stockEvidenceRows.length
                 ? stockEvidenceRows.map((row) => (
