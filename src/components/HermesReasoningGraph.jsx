@@ -158,6 +158,36 @@ function positionGraphNodes(nodes) {
   });
 }
 
+function layoutGraphInViewport(cy) {
+  const nodes = cy.nodes();
+  if (!nodes.length) return;
+
+  const width = Math.max(cy.width(), 320);
+  const height = Math.max(cy.height(), 280);
+  const center = { x: width / 2, y: height / 2 };
+  const maxNodeWidth = Math.max(...nodes.map((node) => Number(node.data("width") || 140)));
+  const maxNodeHeight = Math.max(...nodes.map((node) => Number(node.data("height") || 56)));
+  const radiusX = Math.max(80, Math.min(220, (width - maxNodeWidth - 96) / 2));
+  const radiusY = Math.max(62, Math.min(124, (height - maxNodeHeight - 96) / 2));
+  const peripheralNodes = nodes.filter((node) => node.id() !== "decision");
+  const slotAngles = [-90, -30, 30, 90, 150, -150, -62, 118, 62, -118];
+
+  cy.batch(() => {
+    cy.zoom(1);
+    cy.pan({ x: 0, y: 0 });
+    const decisionNode = cy.getElementById("decision");
+    if (decisionNode.length) decisionNode.position(center);
+
+    peripheralNodes.forEach((node, index) => {
+      const angle = ((slotAngles[index] ?? -90 + (360 / Math.max(peripheralNodes.length, 1)) * index) * Math.PI) / 180;
+      node.position({
+        x: center.x + Math.cos(angle) * radiusX,
+        y: center.y + Math.sin(angle) * radiusY
+      });
+    });
+  });
+}
+
 function buildGraph(stock, hermesOutput, loading) {
   const intel = hermesOutput?.data;
   const decision = (hermesOutput?.hermes_decision?.stocks || intel?.hermes_decision?.stocks || []).find((item) => item.symbol === stock?.symbol);
@@ -328,7 +358,6 @@ export function HermesReasoningGraph({ stock, hermesOutput, loading }) {
       boxSelectionEnabled: false,
       maxZoom: 1.25,
       minZoom: 0.04,
-      panningEnabled: false,
       userPanningEnabled: false,
       userZoomingEnabled: false,
       zoom: 1,
@@ -400,16 +429,13 @@ export function HermesReasoningGraph({ stock, hermesOutput, loading }) {
       layout: {
         name: "preset",
         animate: false,
-        fit: true,
-        padding: 104
+        fit: false
       }
     });
 
     const centerGraph = () => {
       cy.resize();
-      if (cy.elements().length) {
-        cy.fit(cy.elements(), 104);
-      }
+      layoutGraphInViewport(cy);
     };
     const initialNode = cy.getElementById(graph.selected?.id || "decision");
     if (initialNode.length) initialNode.select();
@@ -444,7 +470,7 @@ export function HermesReasoningGraph({ stock, hermesOutput, loading }) {
 
   const resetGraph = React.useCallback(() => {
     if (!cyRef.current) return;
-    cyRef.current.fit(cyRef.current.elements(), 104);
+    layoutGraphInViewport(cyRef.current);
   }, []);
 
   return (

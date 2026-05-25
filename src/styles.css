@@ -871,10 +871,11 @@ select {
 .stock-top {
   width: 100%;
   display: grid;
-  grid-template-columns: auto minmax(0, 1fr);
+  grid-template-columns: auto max-content;
   align-items: center;
-  justify-items: stretch;
-  gap: 5px;
+  justify-content: start;
+  justify-items: start;
+  gap: 3px;
   text-align: left;
 }
 
@@ -892,7 +893,7 @@ select {
 }
 
 .ticker {
-  justify-self: end;
+  justify-self: start;
   font-size: 12px;
   font-weight: 400;
   line-height: 1;
@@ -3051,7 +3052,7 @@ select {
   }
 
   .stock-top {
-    grid-template-columns: auto minmax(0, 1fr);
+    grid-template-columns: auto max-content;
   }
 
   .stock-card .logo {
@@ -3656,8 +3657,8 @@ select {
   }
 
   .stock-top {
-    justify-items: stretch;
-    gap: 4px;
+    justify-items: start;
+    gap: 3px;
   }
 
   .stock-card .logo {
