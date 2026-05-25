@@ -102,15 +102,6 @@ function Logo({ stock }) {
   );
 }
 
-function SearchIcon() {
-  return (
-    <svg viewBox="0 0 24 24" aria-hidden="true">
-      <circle cx="11" cy="11" r="7"></circle>
-      <path d="m16.5 16.5 4 4"></path>
-    </svg>
-  );
-}
-
 function ChevronDownIcon() {
   return (
     <svg viewBox="0 0 24 24" aria-hidden="true">
@@ -331,34 +322,12 @@ function TokenButton({ token, placeholder, onClick, accent }) {
 }
 
 function TokenPicker({ open, title, items, selectedSymbol, onSelect, onClose }) {
-  const [query, setQuery] = React.useState("");
-  const modalRef = React.useRef(null);
-
-  React.useEffect(() => {
-    if (open) setQuery("");
-  }, [open]);
-
   React.useEffect(() => {
     if (!open) return undefined;
 
     const handleKeyDown = (event) => {
       if (event.key === "Escape") {
         onClose();
-        return;
-      }
-
-      if (event.key !== "Tab" || !modalRef.current) return;
-      const focusable = modalRef.current.querySelectorAll("button, input");
-      if (!focusable.length) return;
-
-      const first = focusable[0];
-      const last = focusable[focusable.length - 1];
-      if (event.shiftKey && document.activeElement === first) {
-        event.preventDefault();
-        last.focus();
-      } else if (!event.shiftKey && document.activeElement === last) {
-        event.preventDefault();
-        first.focus();
       }
     };
 
@@ -368,40 +337,24 @@ function TokenPicker({ open, title, items, selectedSymbol, onSelect, onClose }) 
 
   if (!open) return null;
 
-  const filtered = items.filter((item) => {
-    const haystack = `${item.symbol} ${item.name} ${item.address}`.toLowerCase();
-    return haystack.includes(query.trim().toLowerCase());
-  });
-
   return (
-    <div className="token-modal-backdrop" role="presentation" onMouseDown={onClose}>
-      <section ref={modalRef} className="token-modal" role="dialog" aria-modal="true" aria-label={title} onMouseDown={(event) => event.stopPropagation()}>
-        <div className="token-modal-head">
-          <button className="icon-button" type="button" aria-label="Close token picker" onClick={onClose}>
-            <XIcon />
-          </button>
-        </div>
-        <label className="token-search">
-          <SearchIcon />
-          <input value={query} onChange={(event) => setQuery(event.target.value)} placeholder="Search token or paste address" autoFocus />
-        </label>
-        <div className="token-list" role="listbox" aria-label={title}>
-          {filtered.map((item) => {
-            const active = item.symbol === selectedSymbol;
-            return (
-              <button className={`token-row ${active ? "active" : ""}`} type="button" role="option" aria-selected={active} key={item.address || item.symbol} onClick={() => onSelect(item)}>
-                <Logo stock={item} />
-                <span className="token-row-main">
-                  <strong>{item.name}</strong>
-                  <span>{item.symbol}</span>
-                </span>
-                <span className={`token-change ${(item.score || 0) >= 68 ? "up" : ""}`}>{item.score ? `▲ ${(item.score / 100).toFixed(2)}%` : "0.00%"}</span>
-              </button>
-            );
-          })}
-        </div>
-      </section>
-    </div>
+    <section className="token-picker-panel" aria-label={title}>
+      <div className="token-list" role="listbox" aria-label={title}>
+        {items.map((item) => {
+          const active = item.symbol === selectedSymbol;
+          return (
+            <button className={`token-row ${active ? "active" : ""}`} type="button" role="option" aria-selected={active} key={item.address || item.symbol} onClick={() => onSelect(item)}>
+              <Logo stock={item} />
+              <span className="token-row-main">
+                <strong>{item.name}</strong>
+                <span>{item.symbol}</span>
+              </span>
+              <span className={`token-change ${(item.score || 0) >= 68 ? "up" : ""}`}>{item.score ? `▲ ${(item.score / 100).toFixed(2)}%` : "0.00%"}</span>
+            </button>
+          );
+        })}
+      </div>
+    </section>
   );
 }
 
@@ -1396,6 +1349,7 @@ function App() {
   const { disconnect } = useDisconnect();
   const publicClient = usePublicClient({ chainId: ROBINHOOD_CHAIN_ID });
   const { sendTransactionAsync, isPending: walletPending } = useSendTransaction();
+  const swapShellRef = React.useRef(null);
 
   const [selected, setSelected] = React.useState("TSLA");
   const [side, setSide] = React.useState("buy");
@@ -1440,6 +1394,18 @@ function App() {
     setSelected(symbol);
     setDetailsOpen(true);
   }, []);
+
+  React.useEffect(() => {
+    if (!tokenPicker) return undefined;
+
+    const handlePointerDown = (event) => {
+      if (!swapShellRef.current || swapShellRef.current.contains(event.target)) return;
+      setTokenPicker(null);
+    };
+
+    document.addEventListener("pointerdown", handlePointerDown);
+    return () => document.removeEventListener("pointerdown", handlePointerDown);
+  }, [tokenPicker]);
 
   const loadYahooCharts = React.useCallback(async (symbols, rangeLabel) => {
     if (!symbols.length) {
@@ -1809,6 +1775,10 @@ function App() {
     setTokenPicker(null);
   }
 
+  function toggleTokenPicker(kind) {
+    setTokenPicker((current) => (current === kind ? null : kind));
+  }
+
   return (
     <>
       <div className="app-dither-background" aria-hidden="true">
@@ -1854,7 +1824,7 @@ function App() {
       <main className={`workspace ${stock && detailsOpen ? "revealed" : ""}`}>
         <section className="control-stack">
           <form className="panel trade-ticket" onSubmit={submitTrade}>
-            <div className="swap-shell">
+            <div className="swap-shell" ref={swapShellRef}>
               <div className="swap-toolbar">
                 <div className="swap-tabs" aria-label="Trade side">
                   <button className={side === "buy" ? "active" : ""} type="button" onClick={() => setSide("buy")}>Buy</button>
@@ -1868,7 +1838,7 @@ function App() {
                     token={sourceToken}
                     placeholder={side === "sell" ? "Select stock" : "Select token"}
                     accent={side === "buy"}
-                    onClick={() => setTokenPicker(side === "sell" ? "stock" : "pay")}
+                    onClick={() => toggleTokenPicker(side === "sell" ? "stock" : "pay")}
                   />
                   <label className="amount-entry">
                     <input inputMode="decimal" aria-label="Trade amount" placeholder="0" value={amount} onChange={(event) => setAmount(event.target.value)} />
@@ -1889,7 +1859,7 @@ function App() {
                   <TokenButton
                     token={targetToken}
                     placeholder={side === "sell" ? "Select token" : "Select stock"}
-                    onClick={() => setTokenPicker(side === "sell" ? "pay" : "stock")}
+                    onClick={() => toggleTokenPicker(side === "sell" ? "pay" : "stock")}
                   />
                   <div className="amount-entry readout" aria-label="Estimated output amount">
                     <strong>{stock && amountNumber ? estimatedOutput : "0"}</strong>
@@ -1897,6 +1867,29 @@ function App() {
                   </div>
                 </div>
               </div>
+
+              <TokenPicker
+                open={tokenPicker === "stock"}
+                title={side === "sell" ? "Sell token" : "Buy token"}
+                items={stocks}
+                selectedSymbol={stock ? stock.symbol : ""}
+                onSelect={(item) => selectToken("stock", item)}
+                onClose={() => setTokenPicker(null)}
+              />
+              <TokenPicker
+                open={tokenPicker === "pay"}
+                title={side === "sell" ? "Receive token" : "Pay token"}
+                items={payTokens.map((token, index) => ({
+                  logoText: token.symbol.slice(0, 2),
+                  logoBg: index === 0 ? "#f0fff4" : "#edf0ff",
+                  logoFg: index === 0 ? "#08763d" : "#343cff",
+                  score: index === 0 ? 0 : 23,
+                  ...token
+                }))}
+                selectedSymbol={payToken ? payToken.symbol : ""}
+                onSelect={(item) => selectToken("pay", item)}
+                onClose={() => setTokenPicker(null)}
+              />
 
               <div className="wallet-route-stack">
                 <div className="wallet-row wallet-connect-row">
@@ -2026,28 +2019,6 @@ function App() {
           <span>@kuerax on Twitter</span>
         </a>
       </footer>
-      <TokenPicker
-        open={tokenPicker === "stock"}
-        title={side === "sell" ? "Sell token" : "Buy token"}
-        items={stocks}
-        selectedSymbol={stock ? stock.symbol : ""}
-        onSelect={(item) => selectToken("stock", item)}
-        onClose={() => setTokenPicker(null)}
-      />
-      <TokenPicker
-        open={tokenPicker === "pay"}
-        title={side === "sell" ? "Receive token" : "Pay token"}
-        items={payTokens.map((token, index) => ({
-          logoText: token.symbol.slice(0, 2),
-          logoBg: index === 0 ? "#f0fff4" : "#edf0ff",
-          logoFg: index === 0 ? "#08763d" : "#343cff",
-          score: index === 0 ? 0 : 23,
-          ...token
-        }))}
-        selectedSymbol={payToken ? payToken.symbol : ""}
-        onSelect={(item) => selectToken("pay", item)}
-        onClose={() => setTokenPicker(null)}
-      />
     </>
   );
 }
