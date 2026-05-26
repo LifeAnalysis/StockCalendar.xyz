@@ -9,11 +9,6 @@ function formatPrice(value?: number) {
   return `$${n.toFixed(n >= 100 ? 2 : 4)}`;
 }
 
-function parseMarketDollars(value?: string) {
-  const number = Number(value || 0);
-  return Number.isFinite(number) ? number : 0;
-}
-
 export function explainScoreBreakdown(components: ScoreComponent[], total: number) {
   const contributors = components
     .filter((component) => component.points > 0)
@@ -372,19 +367,7 @@ function buildStockRecommendations(
     const explorerConfirmed = explorerDiscovery.tokens.some(
       (token) => token.routed_by_agent && token.address.toLowerCase() === stock.address.toLowerCase()
     );
-    const marketDepth = topMarket
-      ? Math.max(
-          parseMarketDollars(topMarket.liquidity_dollars),
-          parseMarketDollars(topMarket.volume_24h_fp),
-          parseMarketDollars(topMarket.volume_fp)
-        )
-      : 0;
-    const marketDepthOk = marketDepth >= 100;
-    const kalshiMarketPoints = topMarket
-      ? marketDepthOk
-        ? Math.min(topMarket.score * 5, 45)
-        : Math.min(topMarket.score, 15)
-      : 0;
+    const kalshiMarketPoints = topMarket ? Math.min(topMarket.score * 5, 45) : 0;
     const scoreComponents: ScoreComponent[] = [
       { key: "kalshi", label: "Kalshi market", points: kalshiMarketPoints, max: 45, present: Boolean(topMarket) },
       { key: "calendar", label: "Earnings calendar", points: calendar?.ok ? 15 : 0, max: 15, present: Boolean(calendar?.ok) },
@@ -402,7 +385,7 @@ function buildStockRecommendations(
       (news?.article_count || 0) > 0
     ].filter(Boolean).length;
     const recommendation: StockRecommendation["recommendation"] =
-      topMarket && marketDepthOk && stock.address && confidence >= 75
+      topMarket && stock.address && confidence >= 75
         ? "prepare_quote"
         : signalCount >= 2
           ? "watch"

@@ -6,6 +6,7 @@ import * as React from "react";
 import { isAddress } from "viem";
 import { usePublicClient, useSendTransaction } from "wagmi";
 import { earningsEvents } from "./earningsData.js";
+import { HermesReasoningGraph } from "./components/HermesReasoningGraph.jsx";
 import {
   ROBINHOOD_CHAIN_EXPLORER,
   ROBINHOOD_CHAIN_ID,
@@ -123,6 +124,11 @@ function ChevronRightIcon() {
       <path d="m9 18 6-6-6-6"></path>
     </svg>
   );
+}
+
+function sourceHref(value) {
+  const match = String(value || "").match(/https?:\/\/[^\s+]+/);
+  return match ? match[0] : null;
 }
 
 function ArrowDownIcon() {
@@ -267,6 +273,22 @@ function cleanHermesText(value) {
     .replace(/\*\*/g, "")
     .replace(/^\s*[-|]\s*/, "")
     .trim();
+}
+
+function parseHermesReplySections(reply) {
+  const text = String(reply || "").trim();
+  if (!text) return [];
+  const matches = [...text.matchAll(/\*\*(Checked|Final vote|Why|Next)\*\*|(?:^|\n|\s)(Checked|Final vote|Why|Next)\s*:/gi)];
+  if (!matches.length) return [{ title: "Output", body: text }];
+  return matches.map((match, index) => {
+    const title = match[1] || match[2];
+    const start = (match.index || 0) + match[0].length;
+    const end = matches[index + 1]?.index ?? text.length;
+    return {
+      title,
+      body: text.slice(start, end).trim()
+    };
+  });
 }
 
 function shortenAddress(value) {
@@ -473,6 +495,30 @@ function decorateStock(item, index, recommendation, price) {
   };
 }
 
+function buildScoreSentence(components, total) {
+  const contributors = components
+    .filter((component) => component.points > 0)
+    .sort((a, b) => b.points - a.points);
+  const missing = components.filter((component) => !component.present || component.points === 0);
+  if (!contributors.length) {
+    return `Score ${total}/100 - no scored signal cleared its threshold; every component is missing.`;
+  }
+  const joinList = (items) => {
+    if (items.length <= 1) return items.join("");
+    if (items.length === 2) return `${items[0]} and ${items[1]}`;
+    return `${items.slice(0, -1).join(", ")} and ${items[items.length - 1]}`;
+  };
+  const fmt = (component) => `${component.label} (+${component.points})`;
+  const lead = contributors.slice(0, 2).map(fmt);
+  const rest = contributors.slice(2).map(fmt);
+  let contributorPhrase = `led by ${joinList(lead)}`;
+  if (rest.length) contributorPhrase += `, plus ${joinList(rest)}`;
+  const missingPhrase = missing.length
+    ? ` ${joinList(missing.map((component) => component.label))} ${missing.length === 1 ? "is" : "are"} missing.`
+    : "";
+  return `Score ${total}/100 - ${contributorPhrase}.${missingPhrase}`;
+}
+
 function HermesOutputBar({ stock, hermesOutput, loading, progress, overlay = true }) {
   const score = Math.max(0, Math.min(stock.score || 0, 100));
   const decision = hermesOutput?.hermes_decision?.stocks?.find((item) => item.symbol === stock.symbol);
@@ -631,10 +677,11 @@ function HermesOutputBar({ stock, hermesOutput, loading, progress, overlay = tru
 }
 
 function HermesFinalOutput({ hermesOutput, loading }) {
+  const reply = hermesOutput?.reply_source === "openrouter" ? hermesOutput?.reply : "";
   const niceReply = cleanHermesText(hermesOutput?.nice_reply || hermesOutput?.text_output || "");
-  const summary = compactSentence(niceReply || hermesOutput?.hermes_decision?.summary || "", 240);
+  const sections = parseHermesReplySections(reply);
   const votes = hermesOutput?.llm_vote?.stocks || hermesOutput?.hermes_decision?.stocks || [];
-  if (loading || (!summary && !votes.length)) return null;
+  if (loading || (!niceReply && (!reply || !sections.length) && !votes.length)) return null;
 
   return (
     <section className="cn-card hermes-final-output" aria-label="Hermes final output">
@@ -642,15 +689,46 @@ function HermesFinalOutput({ hermesOutput, loading }) {
         <div className="hermes-final-header">
           <div>
             <span>Hermes output</span>
-            <h3>Market summary</h3>
+            <h3>Final vote</h3>
           </div>
         </div>
-        {summary ? (
+        {niceReply ? (
           <div className="hermes-nice-output">
-            <p>{summary}</p>
+            <p>{niceReply}</p>
           </div>
         ) : null}
-        {votes.length ? (
+        {sections.length ? (
+          <div className="hermes-final-sections">
+            {sections.map((section) => {
+              const title = cleanHermesText(section.title);
+              const lines = section.body
+                .split("\n")
+                .map(cleanHermesText)
+                .filter((line) => line && !/^\|[-\s|]+\|?$/.test(line) && !/^stock\s*\|/i.test(line));
+              const showVotes = title.toLowerCase() === "final vote" && votes.length;
+              return (
+                <article key={title} className="hermes-final-section">
+                  <h4>{title}</h4>
+                  {showVotes ? (
+                    <div className="hermes-vote-grid">
+                      {votes.map((vote) => (
+                        <div key={vote.symbol} className="hermes-vote-row">
+                          <strong>{vote.symbol}</strong>
+                          <span>{vote.action}</span>
+                          <small>{vote.confidence}/100</small>
+                        </div>
+                      ))}
+                    </div>
+                  ) : (
+                    <div className="hermes-final-copy">
+                      {lines.map((line) => <p key={line}>{line}</p>)}
+                    </div>
+                  )}
+                </article>
+              );
+            })}
+          </div>
+        ) : votes.length ? (
           <div className="hermes-vote-grid" aria-label="Stock votes">
             {votes.map((vote) => (
               <div key={vote.symbol} className="hermes-vote-row">
@@ -990,6 +1068,248 @@ function WhyRoutePanel({ stock, payToken, side, wallet, connectedToRobinhood, qu
   );
 }
 
+const SCORE_COMPONENT_COLORS = {
+  kalshi: "#407076",
+  calendar: "#a6979c",
+  price: "#ccff00",
+  filing: "#6b7c85",
+  news: "#d86c3f",
+  matches: "#04151f",
+};
+
+function scoreComponentNote(key, ctx) {
+  const { calendar, price, filing, news, kalshi } = ctx;
+  const topMarket = kalshi?.markets?.[0];
+  switch (key) {
+    case "kalshi":
+      return topMarket?.title || topMarket?.ticker || "No clean Kalshi market match.";
+    case "calendar":
+      return calendar?.ok ? "Calendar feed returned earnings context." : "Calendar feed did not return a clean event.";
+    case "price":
+      return price?.ok ? `Quote date ${price.date || "unknown"}` : "No clean latest quote.";
+    case "filing":
+      return filing?.latest_material?.form ? `Latest filing ${filing.latest_material.form}` : "No recent SEC filing signal.";
+    case "news":
+      return news?.article_count ? `${news.article_count} recent news item(s)` : "No clean news signal.";
+    case "matches":
+      return kalshi?.match_count ? `${kalshi.match_count} Kalshi market match(es)` : "No extra market breadth.";
+    default:
+      return "";
+  }
+}
+
+function ConfidenceDecomposition({ stock, hermesOutput, overlay = true, onToggleOverlay }) {
+  const ctx = getHermesContext(stock, hermesOutput);
+  const { decision, explorerConfirmed } = ctx;
+  const symbol = stock?.symbol;
+
+  const [expandedSegment, setExpandedSegment] = React.useState(null);
+  const [biasOpen, setBiasOpen] = React.useState(false);
+  const [weightsBySymbol, setWeightsBySymbol] = React.useState({});
+  const weights = weightsBySymbol[symbol] || {};
+  const overlayOn = overlay !== false;
+
+  const setWeight = (key, value) => {
+    setWeightsBySymbol((prev) => {
+      const current = prev[symbol] || {};
+      return { ...prev, [symbol]: { ...current, [key]: value } };
+    });
+  };
+  const resetBias = () => {
+    setWeightsBySymbol((prev) => ({ ...prev, [symbol]: {} }));
+    onToggleOverlay?.(true);
+  };
+  const weightFor = (key) => {
+    const weight = weights[key];
+    return typeof weight === "number" ? weight : 1;
+  };
+
+  const scoreBreakdown = Array.isArray(decision?.score_breakdown) ? decision.score_breakdown : [];
+  const components = scoreBreakdown.map((component) => {
+    const weight = weightFor(component.key);
+    const adjustedPoints = Math.round((component.points || 0) * weight);
+    return {
+      ...component,
+      weight,
+      adjustedPoints,
+      color: SCORE_COMPONENT_COLORS[component.key] || "#04151f",
+      note: scoreComponentNote(component.key, ctx),
+    };
+  });
+
+  const weightsDirty = components.some((component) => component.weight !== 1);
+  const biasDirty = weightsDirty || !overlayOn;
+  const adjustedTotal = Math.min(
+    95,
+    components.reduce((sum, component) => sum + component.adjustedPoints, 0),
+  );
+  const baseTotal = decision?.confidence ?? Math.min(95, components.reduce((sum, component) => sum + (component.points || 0), 0));
+  const total = weightsDirty ? adjustedTotal : baseTotal;
+
+  const contributionTotal = Math.max(
+    1,
+    components.reduce((sum, component) => sum + component.adjustedPoints, 0),
+  );
+  const segments = components.map((component) => ({
+    key: component.key,
+    label: component.label,
+    color: component.color,
+    note: component.note,
+    points: component.adjustedPoints,
+    max: component.max,
+    percent: Math.round((component.adjustedPoints / contributionTotal) * 100),
+  }));
+  const selectedSegment = segments.find((segment) => segment.key === expandedSegment);
+  const adjustedSentence = buildScoreSentence(
+    components.map((component) => ({ ...component, points: component.adjustedPoints })),
+    adjustedTotal,
+  );
+  const headlineSentence = weightsDirty ? adjustedSentence : decision?.score_explanation;
+
+  const readinessFactors = [
+    { label: "Route", note: stock?.address ? "Official Robinhood Chain stock token contract exists." : "No official stock token route is available." },
+    { label: "Explorer", note: explorerConfirmed ? "Contract found in Robinhood Chain explorer discovery." : "Explorer confirmation not found yet." }
+  ];
+
+  if (!components.length) return null;
+
+  return (
+    <div data-slot="card" data-size="default" className="cn-card confidence-panel confidence-breakdown-card">
+      <div data-slot="card-content" className="cn-card-content confidence-breakdown-content">
+        <div className="confidence-breakdown-head">
+          <span className="score-why-label">Evidence score</span>
+          <span className="text-3xl font-semibold">
+            {total}/100
+            {weightsDirty ? <small className="score-why-adjusted">· adjusted</small> : null}
+          </span>
+        </div>
+        {headlineSentence ? <p className="score-why-sentence">{headlineSentence}</p> : null}
+        <div className="confidence-category-stack">
+          <div aria-label="Hermes confidence category bar">
+            <div className="confidence-category-bar">
+              <div className="confidence-category-track">
+                {segments.map((segment) => (
+                  <button
+                    className="confidence-category-segment"
+                    type="button"
+                    style={{ width: `${segment.percent}%`, backgroundColor: segment.color }}
+                    key={segment.key}
+                    aria-label={`${segment.label} confidence detail`}
+                    aria-expanded={selectedSegment?.key === segment.key}
+                    onClick={() => setExpandedSegment((current) => (current === segment.key ? null : segment.key))}
+                  ></button>
+                ))}
+              </div>
+            </div>
+          </div>
+          <ul className="confidence-category-legend">
+            {segments.map((segment) => (
+              <li key={segment.key}>
+                <button
+                  className="confidence-legend-button"
+                  type="button"
+                  aria-expanded={selectedSegment?.key === segment.key}
+                  onClick={() => setExpandedSegment((current) => (current === segment.key ? null : segment.key))}
+                >
+                  <span className="legend-swatch" style={{ backgroundColor: segment.color }}></span>
+                  <span className="font-medium">{segment.percent}%</span>
+                  <span className="text-muted-foreground">{segment.label}</span>
+                </button>
+              </li>
+            ))}
+          </ul>
+          {selectedSegment ? (
+            <div className="confidence-segment-detail" style={{ "--segment-color": selectedSegment.color }}>
+              <span>{selectedSegment.label} · +{selectedSegment.points} / {selectedSegment.max}</span>
+              <div className="factor-detail-list">
+                {splitReasoningText(selectedSegment.note).map((item) => <p key={item}>{item}</p>)}
+              </div>
+            </div>
+          ) : null}
+        </div>
+        <button
+          type="button"
+          className={`score-bias-toggle ${biasDirty ? "score-bias-toggle-active" : ""}`}
+          onClick={() => setBiasOpen((open) => !open)}
+          aria-expanded={biasOpen}
+        >
+          {biasOpen ? "Hide bias controls" : "Adjust bias"}
+          {biasDirty && !biasOpen ? <span className="score-bias-dot" aria-hidden="true" /> : null}
+        </button>
+        {biasOpen ? (
+          <div className="score-bias-panel">
+            <div className="score-bias-row score-bias-overlay">
+              <label className="score-bias-overlay-label">
+                <input
+                  type="checkbox"
+                  checked={overlayOn}
+                  onChange={(event) => onToggleOverlay?.(event.target.checked)}
+                />
+                <span>Hermes overlay</span>
+              </label>
+              <button type="button" className="score-bias-reset" onClick={resetBias} disabled={!biasDirty}>
+                Reset
+              </button>
+            </div>
+            <div className="score-bias-sliders">
+              {components.map((component) => {
+                const disabled = !component.present || component.points <= 0;
+                return (
+                  <div
+                    className={`score-bias-slider ${disabled ? "score-bias-slider-disabled" : ""}`}
+                    key={component.key}
+                  >
+                    <div className="score-bias-slider-head">
+                      <span className="score-bias-slider-label">{component.label}</span>
+                      <span className="score-bias-slider-meta">
+                        {component.weight.toFixed(1)}x {"->"} +{component.adjustedPoints}
+                      </span>
+                    </div>
+                    <input
+                      type="range"
+                      min="0"
+                      max="2"
+                      step="0.1"
+                      value={component.weight}
+                      disabled={disabled}
+                      onChange={(event) => setWeight(component.key, Number(event.target.value))}
+                      aria-label={`${component.label} trust weight`}
+                    />
+                  </div>
+                );
+              })}
+            </div>
+          </div>
+        ) : null}
+        <div data-orientation="horizontal" role="none" data-slot="separator" className="confidence-separator"></div>
+        <div className="confidence-summary">
+          <span className="font-medium">{decision?.action || "Hermes"} confidence factors</span>
+          <div className="confidence-summary-grid">
+            {segments.map((factor) => (
+              <article key={factor.key}>
+                <span>{factor.label}</span>
+                <p>{factor.note}</p>
+              </article>
+            ))}
+          </div>
+          <span className="font-medium">Route readiness</span>
+          <div className="confidence-summary-grid">
+            {readinessFactors.map((factor) => (
+              <article key={factor.label}>
+                <span>{factor.label}</span>
+                <p>{factor.note}</p>
+              </article>
+            ))}
+          </div>
+          <small className="confidence-formula-note">
+            Formula: up to 45 Kalshi market quality + 15 calendar + 15 latest quote + 15 SEC filing + up to 10 news + up to 10 Kalshi breadth, capped at 95. Route and explorer checks are readiness, not confidence.
+          </small>
+        </div>
+      </div>
+    </div>
+  );
+}
+
 function PredictionMarketOverlay({ stock, hermesOutput }) {
   const { kalshi } = getHermesContext(stock, hermesOutput);
   const markets = (kalshi?.markets || []).slice(0, 3);
@@ -1039,6 +1359,45 @@ function PredictionMarketOverlay({ stock, hermesOutput }) {
       ) : (
         <p className="empty-module-note">No matching Kalshi market found for this stock.</p>
       )}
+    </section>
+  );
+}
+
+function DataProvenanceView({ hermesOutput }) {
+  const [expanded, setExpanded] = React.useState(false);
+  const intel = hermesOutput?.data;
+  const checks = intel?.pipeline?.checks || [];
+
+  return (
+    <section className={`hermes-module provenance-view ${expanded ? "expanded" : ""}`} aria-label="Data provenance">
+      <div className="module-head">
+        <div>
+          <div className="menu-title-row">
+            <MotionAsset src="/media/icons/hermes-thinking.mp4" webmSrc="/media/icons/hermes-thinking.webm" className="menu-title-motion" />
+            <h3>Data Feed</h3>
+          </div>
+        </div>
+        <button className="provenance-toggle" type="button" aria-expanded={expanded} onClick={() => setExpanded((current) => !current)}>
+          <span>{expanded ? "Collapse" : "Expand"}</span>
+          {expanded ? <MinusIcon /> : <PlusIcon />}
+        </button>
+      </div>
+      {expanded ? (
+        <div className="provenance-list">
+          {checks.map((check) => (
+            <div className={`provenance-row ${check.ok ? "ok" : "degraded"}`} key={check.name}>
+              <div>
+                <span>{check.name.replaceAll("_", " ")}</span>
+                {sourceHref(check.source) ? (
+                  <a className="source-button" href={sourceHref(check.source)} target="_blank" rel="noreferrer">Source</a>
+                ) : null}
+              </div>
+              <strong>{check.records ?? 0} records</strong>
+              {check.error ? <p>{check.error}</p> : check.note ? <p>{check.note}</p> : null}
+            </div>
+          ))}
+        </div>
+      ) : null}
     </section>
   );
 }
@@ -1241,8 +1600,18 @@ function App() {
   const [isPreparingQuote, setIsPreparingQuote] = React.useState(false);
   const [isExecutingQuote, setIsExecutingQuote] = React.useState(false);
   const [journalEntries, setJournalEntries] = React.useState([]);
+  const [overlayBySymbol, setOverlayBySymbol] = React.useState({});
 
   const stock = stocks.find((item) => item.symbol === selected);
+  const hermesOverlayOn = overlayBySymbol[stock?.symbol] ?? true;
+  const setHermesOverlay = React.useCallback(
+    (value) => {
+      const symbol = stock?.symbol;
+      if (!symbol) return;
+      setOverlayBySymbol((prev) => ({ ...prev, [symbol]: value }));
+    },
+    [stock?.symbol],
+  );
   const payToken = payTokens.find((token) => token.symbol === payTokenSymbol) || payTokens[0];
   const sourceToken = side === "sell" ? stock : payToken;
   const targetToken = side === "sell" ? payToken : stock;
@@ -1389,14 +1758,6 @@ function App() {
           setBackend({ ...nextBackend });
         }
 
-        setHermesProgress(HERMES_PROGRESS.model);
-        const outputRes = await fetch("/api/hermes/output");
-        const output = await readJsonResponse(outputRes);
-        if (cancelled) return;
-        const outputIntel = output?.data;
-        if (output) setHermesOutput(output);
-        applyIntel(outputIntel, nextBackend);
-        setBackend({ ...nextBackend });
         setHermesProgress(HERMES_PROGRESS.ready);
       } catch (error) {
         console.warn("Stock intel unavailable", error);
@@ -1411,6 +1772,34 @@ function App() {
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
+
+  React.useEffect(() => {
+    if (!selected || !stocks.some((item) => item.symbol === selected)) return undefined;
+    let cancelled = false;
+
+    async function loadSelectedHermesOutput() {
+      setHermesLoading(true);
+      setHermesProgress(HERMES_PROGRESS.model);
+      try {
+        const params = new URLSearchParams({ symbol: selected });
+        const outputRes = await fetch(`/api/hermes/output?${params.toString()}`, { cache: "no-store" });
+        const output = await readJsonResponse(outputRes);
+        if (cancelled) return;
+        if (output) setHermesOutput(output);
+        setHermesProgress(HERMES_PROGRESS.ready);
+      } catch (error) {
+        console.warn("Selected Hermes output unavailable", error);
+        if (!cancelled) setHermesProgress(HERMES_PROGRESS.degraded);
+      } finally {
+        if (!cancelled) setHermesLoading(false);
+      }
+    }
+
+    loadSelectedHermesOutput();
+    return () => {
+      cancelled = true;
+    };
+  }, [selected, stocks]);
 
   React.useEffect(() => {
     loadYahooCharts(stocks.map((item) => item.symbol), chartRange);
@@ -1854,10 +2243,13 @@ function App() {
                 status={chartStatus}
                 selectedRange={chartRange}
               />
-              <HermesOutputBar stock={stock} hermesOutput={hermesOutput} loading={hermesLoading} progress={hermesProgress} />
+              <HermesOutputBar stock={stock} hermesOutput={hermesOutput} loading={hermesLoading} progress={hermesProgress} overlay={hermesOverlayOn} />
               <HermesFinalOutput hermesOutput={hermesOutput} loading={hermesLoading} />
+              <ConfidenceDecomposition stock={stock} hermesOutput={hermesOutput} overlay={hermesOverlayOn} onToggleOverlay={setHermesOverlay} />
+              <HermesReasoningGraph stock={stock} hermesOutput={hermesOutput} loading={hermesLoading} />
               <EarningsBacktestTable stock={stock} backtest={backtests[stock.symbol]} loading={backtestStatus === "loading" && !backtests[stock.symbol]} />
               <PredictionMarketOverlay stock={stock} hermesOutput={hermesOutput} />
+              <DataProvenanceView hermesOutput={hermesOutput} />
               <PostTradeJournal entries={journalEntries} stock={stock} />
             </div>
           </section>

@@ -50,6 +50,20 @@ export const DEFAULT_HERMES_OUTPUT_PROMPT =
   "For Tesla, Amazon, Palantir, Netflix, and AMD, identify any Robinhood Chain stock-token quote worth preparing now. Use only the executed Hermes tool results as evidence and keep the wallet-signing boundary explicit.";
 
 const HERMES_SYSTEM_PROMPT_VERSION = "robinhood-chain-research-v5";
+type StockIntel = Awaited<ReturnType<typeof buildStockIntel>>;
+type HermesOutputOptions = { debug?: boolean; bypassCache?: boolean; symbol?: string };
+
+function normalizeSymbol(value?: string | null) {
+  return String(value || "").trim().toUpperCase();
+}
+
+function tickerResearchPrompt(symbol: string) {
+  return `Research ${symbol} only. Produce a deep Robinhood Chain stock-token quote-prep vote for this ticker alone. Do not compare it against other tickers. Use only DATA_PIPELINE_JSON and keep the wallet-signing boundary explicit.`;
+}
+
+function comparisonPrompt() {
+  return "Compare the completed per-ticker Hermes research outputs. Do not revisit raw source evidence or let one ticker change another ticker's standalone research. Rank quote-prep readiness across all completed ticker memos and keep the wallet-signing boundary explicit.";
+}
 
 function buildHermesSystemPrompt() {
   return [
@@ -63,7 +77,7 @@ function buildHermesSystemPrompt() {
     "Kalshi website search pages are not a runtime data source. Use only public Trade API records included in DATA_PIPELINE_JSON and the local stock-term filter metadata.",
     "Every stock must receive one final action: BUY, WATCH, NO_BUY, or CONFIG_NEEDED. You may differ from the deterministic evidence score when the supplied evidence justifies it.",
     "BUY means quote preparation may be shown, not that Hermes can execute. WATCH and NO_BUY must not ask the user to sign.",
-    "BUY requires a clean matched Kalshi market with YES/NO pricing and meaningful market depth. If liquidity and volume are effectively zero or tiny, keep the stock at WATCH even when a ticker match exists.",
+    "BUY requires a clean matched Kalshi market with YES/NO pricing. Do not downgrade solely for low displayed market liquidity because this is Robinhood Chain testnet quote-prep research, not production execution.",
     "For quote prep, require exact source_asset, target_asset, wallet_address, amount, and chainId 46630.",
     "When YES/NO prices exist, explain what they support and include bid/ask values. When no clean market exists, say the absence clearly.",
     "If a source is degraded, say so directly and do not infer missing data.",
@@ -92,7 +106,7 @@ function formatVolume(value?: number) {
   return String(value);
 }
 
-function decisionReply(decision: Awaited<ReturnType<typeof buildStockIntel>>["hermes_decision"], intel: Awaited<ReturnType<typeof buildStockIntel>>) {
+function decisionReply(decision: StockIntel["hermes_decision"], intel: StockIntel) {
   const degraded = intel.pipeline.degraded_sources.length ? ` Degraded sources: ${intel.pipeline.degraded_sources.join(", ")}.` : "";
   const recommendations = decision.stocks
     .map((row) => {
@@ -113,7 +127,7 @@ function decisionReply(decision: Awaited<ReturnType<typeof buildStockIntel>>["he
   ].join("\n");
 }
 
-function fallbackReply(intel: Awaited<ReturnType<typeof buildStockIntel>>) {
+function fallbackReply(intel: StockIntel) {
   return decisionReply(intel.hermes_decision, intel);
 }
 
@@ -123,7 +137,7 @@ function clipText(value: unknown, max = 400) {
   return text.length > max ? `${text.slice(0, Math.max(0, max - 3))}...` : text;
 }
 
-function buildVoteContext(intel: Awaited<ReturnType<typeof buildStockIntel>>) {
+function buildVoteContext(intel: StockIntel) {
   return {
     timestamp: intel.timestamp,
     source_policy: intel.hermes_decision.source_note,
@@ -194,7 +208,7 @@ function buildVoteContext(intel: Awaited<ReturnType<typeof buildStockIntel>>) {
   };
 }
 
-function buildOpenRouterDataPipeline(intel: Awaited<ReturnType<typeof buildStockIntel>>) {
+function buildOpenRouterDataPipeline(intel: StockIntel) {
   return {
     system_prompt_version: HERMES_SYSTEM_PROMPT_VERSION,
     timestamp: intel.timestamp,
@@ -274,6 +288,203 @@ function buildOpenRouterDataPipeline(intel: Awaited<ReturnType<typeof buildStock
   };
 }
 
+function actionCountsFor(stocks: StockIntel["hermes_decision"]["stocks"]) {
+  return stocks.reduce<Record<VoteAction, number>>(
+    (counts, stock) => {
+      counts[stock.action] += 1;
+      return counts;
+    },
+    { BUY: 0, WATCH: 0, NO_BUY: 0, CONFIG_NEEDED: 0 }
+  );
+}
+
+function focusStockIntel(intel: StockIntel, symbol: string): StockIntel {
+  const normalized = normalizeSymbol(symbol);
+  const stock = intel.robinhood_chain.stocks.find((item) => item.symbol === normalized);
+  if (!stock) {
+    throw new Error(`Unsupported Robinhood Chain stock symbol: ${normalized || "missing"}`);
+  }
+
+  const recommendations = intel.recommendations.filter((item) => item.symbol === normalized);
+  const decisionStocks = intel.hermes_decision.stocks.filter((item) => item.symbol === normalized);
+  const kalshiStocks = intel.kalshi.stocks.filter((row) => row.stock.symbol === normalized);
+  const calendars = intel.calendars.filter((row) => row.symbol === normalized);
+  const prices = intel.stock_signals.prices.filter((row) => row.symbol === normalized);
+  const filings = intel.stock_signals.filings.filter((row) => row.symbol === normalized);
+  const news = intel.stock_signals.news.filter((row) => row.symbol === normalized);
+  const aliases = [stock.symbol, stock.name, ...(stock.aliases || [])].map((value) => value.toLowerCase());
+  const searchedTerms = (intel.kalshi.searched_terms || []).filter((term) => aliases.includes(term.toLowerCase()));
+  const officialTokens = intel.explorer_discovery.tokens.filter(
+    (token) => token.address?.toLowerCase() === stock.address.toLowerCase() || token.symbol === stock.symbol
+  );
+  const focusedDecision = {
+    ...intel.hermes_decision,
+    verdict: `${stock.symbol} focused Hermes research`,
+    summary: decisionStocks[0]
+      ? `${stock.symbol} standalone vote: ${decisionStocks[0].action} at ${decisionStocks[0].confidence}/100.`
+      : `${stock.symbol} standalone vote unavailable.`,
+    searched_terms: searchedTerms,
+    action_counts: actionCountsFor(decisionStocks),
+    user_action: decisionStocks[0]?.user_action || intel.hermes_decision.user_action,
+    stocks: decisionStocks
+  };
+
+  return {
+    ...intel,
+    robinhood_chain: {
+      ...intel.robinhood_chain,
+      stock_count: 1,
+      stocks: [stock]
+    },
+    explorer_discovery: {
+      ...intel.explorer_discovery,
+      official_count: officialTokens.filter((token) => token.routed_by_agent || token.trust_level === "official").length,
+      other_count: officialTokens.filter((token) => !(token.routed_by_agent || token.trust_level === "official")).length,
+      stock_like_count: officialTokens.length,
+      tokens: officialTokens
+    },
+    stock_signals: {
+      ...intel.stock_signals,
+      prices,
+      filings,
+      news
+    },
+    kalshi: {
+      ...intel.kalshi,
+      searched_terms: searchedTerms,
+      stocks: kalshiStocks
+    },
+    calendars,
+    recommendations,
+    hermes_decision: focusedDecision,
+    agent_context: {
+      ...intel.agent_context,
+      stock_tokens: [stock],
+      kalshi_matches: (intel.agent_context?.kalshi_matches || []).filter((row: { symbol?: string }) => row.symbol === normalized),
+      calendars: (intel.agent_context?.calendars || []).filter((row: { symbol?: string }) => row.symbol === normalized),
+      stock_signals: (intel.agent_context?.stock_signals || []).filter((row: { symbol?: string }) => row.symbol === normalized),
+      recommendations,
+      hermes_decision: focusedDecision
+    }
+  };
+}
+
+function tickerNiceReply(decision: StockIntel["hermes_decision"]) {
+  const stock = decision.stocks[0];
+  if (!stock) return decision.summary;
+  return [
+    `${stock.symbol}: ${stock.action} at ${stock.confidence}/100.`,
+    `Why: ${stock.reason}`,
+    `Next: ${stock.user_action}`
+  ].join("\n");
+}
+
+function buildComparisonDataPipeline(tickerOutputs: Array<Awaited<ReturnType<typeof composeHermesOutput>>>) {
+  return {
+    system_prompt_version: HERMES_SYSTEM_PROMPT_VERSION,
+    comparison_contract: {
+      input_type: "completed_per_ticker_research_outputs",
+      rule: "Compare ticker research outputs only after standalone ticker votes are complete.",
+      anti_bias: "Do not alter a ticker's standalone research because another ticker is stronger; only rank quote-prep readiness."
+    },
+    ticker_outputs: tickerOutputs.map((output) => ({
+      reply_source: output.reply_source,
+      symbol: output.hermes_decision?.stocks?.[0]?.symbol,
+      action: output.hermes_decision?.stocks?.[0]?.action,
+      confidence: output.hermes_decision?.stocks?.[0]?.confidence,
+      reason: output.hermes_decision?.stocks?.[0]?.reason,
+      user_action: output.hermes_decision?.stocks?.[0]?.user_action,
+      reply: output.reply,
+      stock_reply: output.hermes_decision?.stocks?.[0]?.symbol
+        ? output.stock_replies?.[output.hermes_decision.stocks[0].symbol]
+        : undefined
+    }))
+  };
+}
+
+function buildComparisonSystemPrompt() {
+  return [
+    "You are Hermes Agent comparator for Robinhood Chain stock-token execution research.",
+    "The app has already completed one standalone research pass per ticker. Treat COMPARISON_JSON as completed ticker memos, not raw evidence.",
+    "Do not browse, fetch, call tools, or reinterpret raw source payloads.",
+    "Do not change a ticker's standalone action because another ticker is better. Your job is only to rank readiness and explain the relative choice.",
+    "Final vote must list every ticker action and confidence from the completed ticker memos.",
+    "BUY means quote preparation may be shown, not execution. WATCH and NO_BUY must not ask the user to sign.",
+    "Write reply in four compact sections with each heading on its own line exactly: Checked, Final vote, Why, Next.",
+    "Checked must say standalone ticker research completed, then comparison pass completed.",
+    "Why must explain the best setup and why the others stay lower priority. Do not use low displayed liquidity as the reason a ticker loses; only absence of a clean market, missing pricing, stale/missing public quote, missing filings, source degradation, or weak ticker-specific evidence should lower priority.",
+    "Next must keep the wallet boundary explicit.",
+    "Return only valid JSON with this shape: {\"verdict\":\"...\",\"summary\":\"...\",\"user_action\":\"...\",\"reply\":\"concise user-facing textual output\",\"stocks\":[{\"symbol\":\"TSLA\",\"action\":\"BUY|WATCH|NO_BUY|CONFIG_NEEDED\",\"confidence\":0,\"reason\":\"...\",\"user_action\":\"...\"}]}."
+  ].join(" ");
+}
+
+async function askHermesComparison(
+  tickerOutputs: Array<Awaited<ReturnType<typeof composeHermesOutput>>>,
+  intel: StockIntel
+): Promise<OpenRouterChatResult> {
+  const apiKey = env("OPENROUTER_API_KEY");
+  const model = env("OPENROUTER_MODEL", "deepseek/deepseek-v4-flash");
+  if (!apiKey) {
+    return { configured: false, ok: false, model, reply: null, vote: null, error: "OPENROUTER_API_KEY is not configured" };
+  }
+
+  const maxTokens = Number(env("OPENROUTER_MAX_TOKENS", "1800"));
+  const timeoutMs = Number(env("OPENROUTER_TIMEOUT_MS", "90000"));
+  const dataPipelineJson = JSON.stringify(buildComparisonDataPipeline(tickerOutputs));
+  const response = await fetchJson<OpenRouterResponse>("https://openrouter.ai/api/v1/chat/completions", {
+    method: "POST",
+    timeoutMs: Number.isFinite(timeoutMs) ? Math.max(10000, Math.trunc(timeoutMs)) : 90000,
+    headers: {
+      Authorization: `Bearer ${apiKey}`,
+      "HTTP-Referer": "https://hermes-agent-backend.vercel.app",
+      "X-OpenRouter-Title": "Hermes Robinhood Chain",
+      "X-Title": "Hermes Robinhood Chain"
+    },
+    body: {
+      model,
+      temperature: 0.15,
+      max_tokens: Number.isFinite(maxTokens) ? Math.min(Math.max(Math.trunc(maxTokens), 256), 4096) : 1800,
+      response_format: { type: "json_object" },
+      messages: [
+        { role: "system", content: buildComparisonSystemPrompt() },
+        { role: "system", content: `COMPARISON_JSON=${dataPipelineJson}` },
+        { role: "user", content: comparisonPrompt() }
+      ]
+    }
+  });
+
+  const choice = response.data?.choices?.[0];
+  const reply = choice?.message?.content?.trim() || null;
+  const vote = normalizeVote(parseJsonObject(reply), intel);
+  if (response.ok && vote) {
+    return {
+      configured: true,
+      ok: true,
+      model,
+      reply,
+      vote,
+      prompt_payload_bytes: dataPipelineJson.length,
+      status: response.status,
+      finish_reason: choice?.finish_reason,
+      provider_model: response.data?.model,
+      usage: response.data?.usage
+    };
+  }
+  return {
+    configured: true,
+    ok: false,
+    model,
+    reply: null,
+    vote: null,
+    prompt_payload_bytes: dataPipelineJson.length,
+    status: response.status,
+    error: safeOpenRouterError(response.data) || response.error || (response.ok ? "openrouter_invalid_or_empty_comparison_vote" : "openrouter_request_failed"),
+    finish_reason: choice?.finish_reason,
+    provider_model: response.data?.model,
+    usage: response.data?.usage
+  };
+}
+
 function safeOpenRouterError(response: OpenRouterResponse | undefined): string | undefined {
   if (!response?.error) return undefined;
   if (typeof response.error === "string") return response.error.slice(0, 240);
@@ -301,7 +512,7 @@ function parseJsonObject(text: string | null): unknown {
   }
 }
 
-function normalizeVote(value: unknown, intel: Awaited<ReturnType<typeof buildStockIntel>>): LlmVote | null {
+function normalizeVote(value: unknown, intel: StockIntel): LlmVote | null {
   if (!value || typeof value !== "object") return null;
   const data = value as Partial<LlmVote>;
   if (!Array.isArray(data.stocks)) return null;
@@ -345,7 +556,7 @@ function labelForAction(action: VoteAction) {
   return "No buy";
 }
 
-function buildOpenRouterDecision(vote: LlmVote, intel: Awaited<ReturnType<typeof buildStockIntel>>) {
+function buildOpenRouterDecision(vote: LlmVote, intel: StockIntel) {
   const voteBySymbol = new Map(vote.stocks.map((stock) => [stock.symbol, stock]));
   const actionCounts = { BUY: 0, WATCH: 0, NO_BUY: 0, CONFIG_NEEDED: 0 };
   const stocks = intel.hermes_decision.stocks.map((stock) => {
@@ -374,7 +585,7 @@ function buildOpenRouterDecision(vote: LlmVote, intel: Awaited<ReturnType<typeof
   };
 }
 
-function buildStockReplies(decision: Awaited<ReturnType<typeof buildStockIntel>>["hermes_decision"], intel: Awaited<ReturnType<typeof buildStockIntel>>) {
+function buildStockReplies(decision: StockIntel["hermes_decision"], intel: StockIntel) {
   const recommendationBySymbol = new Map(intel.recommendations.map((recommendation) => [recommendation.symbol, recommendation]));
   const degraded = new Set(intel.pipeline.degraded_sources);
   return Object.fromEntries(
@@ -461,7 +672,8 @@ function formatShortDate(value?: string) {
   return date.toLocaleDateString("en-US", { month: "short", day: "numeric", timeZone: "UTC" });
 }
 
-function buildNiceReply(decision: Awaited<ReturnType<typeof buildStockIntel>>["hermes_decision"], intel: Awaited<ReturnType<typeof buildStockIntel>>) {
+function buildNiceReply(decision: StockIntel["hermes_decision"], intel: StockIntel) {
+  if (decision.stocks.length === 1) return tickerNiceReply(decision);
   const recommendationBySymbol = new Map(intel.recommendations.map((recommendation) => [recommendation.symbol, recommendation]));
   const buy = decision.stocks.filter((stock) => stock.action === "BUY");
   const watch = decision.stocks.filter((stock) => stock.action === "WATCH");
@@ -508,7 +720,7 @@ function buildNiceReply(decision: Awaited<ReturnType<typeof buildStockIntel>>["h
   ].filter(Boolean).join("\n");
 }
 
-async function askHermes(message: string, intel: Awaited<ReturnType<typeof buildStockIntel>>): Promise<OpenRouterChatResult> {
+async function askHermes(message: string, intel: StockIntel): Promise<OpenRouterChatResult> {
   const apiKey = env("OPENROUTER_API_KEY");
   const model = env("OPENROUTER_MODEL", "deepseek/deepseek-v4-flash");
   if (!apiKey) {
@@ -578,23 +790,94 @@ async function askHermes(message: string, intel: Awaited<ReturnType<typeof build
   };
 }
 
-export async function buildHermesOutput(message = DEFAULT_HERMES_OUTPUT_PROMPT, options: { debug?: boolean; bypassCache?: boolean } = {}) {
+async function composeHermesOutput(intel: StockIntel, message: string, options: { debug?: boolean; scope?: "ticker" | "comparison" | "desk" } = {}) {
+  const chat = await askHermes(message, intel);
+  const finalDecision = chat.vote ? buildOpenRouterDecision(chat.vote, intel) : intel.hermes_decision;
+  const replySource = chat.vote ? "openrouter" : "fallback";
+  const reply = chat.vote ? chat.vote.reply || decisionReply(finalDecision, intel) : fallbackReply(intel);
+  const niceReply = buildNiceReply(finalDecision, intel);
+  return {
+    reply,
+    nice_reply: niceReply,
+    text_output: niceReply,
+    reply_source: replySource,
+    vote_source: replySource,
+    research_scope: options.scope || (intel.hermes_decision.stocks.length === 1 ? "ticker" : "desk"),
+    llm_vote: chat.vote,
+    stock_replies: buildStockReplies(finalDecision, intel),
+    ui_brief_source: "data.recommendations",
+    system_prompt_version: HERMES_SYSTEM_PROMPT_VERSION,
+    hermes_decision: finalDecision,
+    data: options.debug ? intel : compactStockIntel(intel),
+    tool_trace: [
+      {
+        name: "buildStockIntel",
+        ok: intel.ok,
+        role: "app_executed_tools",
+        degraded_sources: intel.pipeline.degraded_sources
+      },
+      {
+        name: "openrouter_chat",
+        ok: chat.ok,
+        configured: chat.configured,
+        role: "final_vote_from_supplied_tool_results",
+        model: chat.model,
+        prompt_payload_bytes: chat.prompt_payload_bytes,
+        provider_model: chat.provider_model,
+        status: chat.status,
+        finish_reason: chat.finish_reason,
+        error: chat.error,
+        usage: chat.usage
+      }
+    ]
+  };
+}
+
+export async function buildHermesComparisonOutput(options: { debug?: boolean; bypassCache?: boolean } = {}) {
   try {
     const intel = await buildStockIntel({ bypassCache: options.bypassCache });
-    const chat = await askHermes(message, intel);
-    const finalDecision = chat.vote ? buildOpenRouterDecision(chat.vote, intel) : intel.hermes_decision;
-    const replySource = chat.vote ? "openrouter" : "fallback";
-    const reply = chat.vote ? chat.vote.reply || decisionReply(finalDecision, intel) : fallbackReply(intel);
-    const niceReply = buildNiceReply(finalDecision, intel);
+    const tickerOutputs = await Promise.all(
+      intel.robinhood_chain.stocks.map((stock) =>
+        composeHermesOutput(focusStockIntel(intel, stock.symbol), tickerResearchPrompt(stock.symbol), {
+          debug: options.debug,
+          scope: "ticker"
+        })
+      )
+    );
+    const comparison = await askHermesComparison(tickerOutputs, intel);
+    const perTickerVotes = tickerOutputs
+      .map((output) => output.hermes_decision.stocks[0])
+      .filter((stock): stock is StockIntel["hermes_decision"]["stocks"][number] => Boolean(stock));
+    const mergedDecision = {
+      ...intel.hermes_decision,
+      verdict: perTickerVotes.some((stock) => stock.action === "BUY") ? "Parallel ticker research comparison complete" : "Parallel ticker research found no buy setup",
+      summary: "Standalone ticker research completed first; comparison pass ranked the finished ticker memos.",
+      action_counts: actionCountsFor(perTickerVotes),
+      stocks: perTickerVotes
+    };
+    const finalDecision = comparison.vote ? buildOpenRouterDecision(comparison.vote, { ...intel, hermes_decision: mergedDecision }) : mergedDecision;
+    const replySource = comparison.vote ? "openrouter" : "fallback";
+    const reply = comparison.vote?.reply || decisionReply(finalDecision, { ...intel, hermes_decision: finalDecision });
+    const niceReply = buildNiceReply(finalDecision, { ...intel, hermes_decision: finalDecision });
     return {
       reply,
       nice_reply: niceReply,
       text_output: niceReply,
       reply_source: replySource,
       vote_source: replySource,
-      llm_vote: chat.vote,
-      stock_replies: buildStockReplies(finalDecision, intel),
-      ui_brief_source: "data.recommendations",
+      research_scope: "comparison",
+      llm_vote: comparison.vote,
+      ticker_outputs: tickerOutputs.map((output) => ({
+        symbol: output.hermes_decision.stocks[0]?.symbol,
+        reply_source: output.reply_source,
+        vote_source: output.vote_source,
+        reply: output.reply,
+        nice_reply: output.nice_reply,
+        hermes_decision: output.hermes_decision,
+        tool_trace: output.tool_trace
+      })),
+      stock_replies: buildStockReplies(finalDecision, { ...intel, hermes_decision: finalDecision }),
+      ui_brief_source: "ticker_outputs_then_comparison",
       system_prompt_version: HERMES_SYSTEM_PROMPT_VERSION,
       hermes_decision: finalDecision,
       data: options.debug ? intel : compactStockIntel(intel),
@@ -602,24 +885,45 @@ export async function buildHermesOutput(message = DEFAULT_HERMES_OUTPUT_PROMPT, 
         {
           name: "buildStockIntel",
           ok: intel.ok,
-          role: "app_executed_tools",
+          role: "shared_source_fetch_for_parallel_ticker_research",
           degraded_sources: intel.pipeline.degraded_sources
         },
         {
-          name: "openrouter_chat",
-          ok: chat.ok,
-          configured: chat.configured,
-          role: "final_vote_from_supplied_tool_results",
-          model: chat.model,
-          prompt_payload_bytes: chat.prompt_payload_bytes,
-          provider_model: chat.provider_model,
-          status: chat.status,
-          finish_reason: chat.finish_reason,
-          error: chat.error,
-          usage: chat.usage
+          name: "parallel_ticker_research",
+          ok: tickerOutputs.every((output) => output.reply_source === "openrouter"),
+          role: "standalone_ticker_votes",
+          tickers: tickerOutputs.map((output) => output.hermes_decision.stocks[0]?.symbol).filter(Boolean)
+        },
+        {
+          name: "openrouter_comparison",
+          ok: comparison.ok,
+          configured: comparison.configured,
+          role: "compare_completed_ticker_research_outputs",
+          model: comparison.model,
+          prompt_payload_bytes: comparison.prompt_payload_bytes,
+          provider_model: comparison.provider_model,
+          status: comparison.status,
+          finish_reason: comparison.finish_reason,
+          error: comparison.error,
+          usage: comparison.usage
         }
       ]
     };
+  } catch (error) {
+    return buildHermesOutput(undefined, { ...options });
+  }
+}
+
+export async function buildHermesOutput(message = DEFAULT_HERMES_OUTPUT_PROMPT, options: HermesOutputOptions = {}) {
+  try {
+    const baseIntel = await buildStockIntel({ bypassCache: options.bypassCache });
+    const symbol = normalizeSymbol(options.symbol);
+    const intel = symbol ? focusStockIntel(baseIntel, symbol) : baseIntel;
+    const prompt = symbol ? tickerResearchPrompt(symbol) : message;
+    return await composeHermesOutput(intel, prompt, {
+      debug: options.debug,
+      scope: symbol ? "ticker" : "desk"
+    });
   } catch (error) {
     const messageText = error instanceof Error ? error.message : String(error);
     const niceReply = `Hermes cannot produce a clean buy or no-buy read right now because output generation failed. Retry after checking OpenRouter, network endpoints, and required env vars. Detail: ${messageText || "unknown error"}`;
