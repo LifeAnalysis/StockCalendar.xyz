@@ -222,12 +222,24 @@ function deterministicActions(intent: string, context: AgentContext, symbol: str
   }
 
   if (intent === "web_research") {
-    actions.push({ type: "news_scan", label: `Scan latest ${symbol} news`, payload: { symbol, prompt: `Cerca news e catalyst recenti per ${symbol}` } });
-    actions.push({ type: "quant_analysis", label: `Run quant on ${symbol}`, payload: { symbol, prompt: `Fammi analisi quant di ${symbol}` } });
+    actions.push({
+      type: "news_scan",
+      label: `Scan latest ${symbol} news`,
+      payload: { symbol, prompt: `Scan recent public news and catalysts for ${symbol}. Return the top headlines, source context, and why they matter for the current stock-token setup.` }
+    });
+    actions.push({
+      type: "quant_analysis",
+      label: `Run quant on ${symbol}`,
+      payload: { symbol, prompt: `Run a quant snapshot for ${symbol}. Include recent price change, momentum, volatility, moving-average context, and a concise trading-readiness takeaway.` }
+    });
   }
 
   if (intent === "quant_analysis") {
-    actions.push({ type: "web_research", label: `Add news context for ${symbol}`, payload: { symbol, prompt: `Cercami su internet catalyst e news per ${symbol}` } });
+    actions.push({
+      type: "web_research",
+      label: `Add news context for ${symbol}`,
+      payload: { symbol, prompt: `Add recent public news context for ${symbol}. Focus on catalysts, earnings or filing updates, notable headlines, and how the news changes the quant read.` }
+    });
     actions.push({ type: "prepare_quote", label: `Prepare ${symbol} quote`, payload: { symbol } });
   }
 
