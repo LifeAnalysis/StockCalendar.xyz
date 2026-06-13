@@ -381,9 +381,9 @@ function TokenPicker({ open, title, items, selectedSymbol, onSelect, onClose }) 
           const active = item.symbol === selectedSymbol;
           return (
             <button className={`token-row ${active ? "active" : ""}`} type="button" role="option" aria-selected={active} key={item.address || item.symbol} onClick={() => onSelect(item)}>
-              <span className={`token-change ${(item.score || 0) >= 68 ? "up" : ""}`}>{item.score ? `▲ ${(item.score / 100).toFixed(2)}%` : "0.00%"}</span>
-              <span className="token-row-symbol">{item.symbol}</span>
               <Logo stock={item} />
+              <span className="token-row-symbol">{item.symbol}</span>
+              <span className={`token-change ${(item.score || 0) >= 68 ? "up" : ""}`}>{item.score ? `▲ ${(item.score / 100).toFixed(2)}%` : "0.00%"}</span>
             </button>
           );
         })}
@@ -2191,7 +2191,7 @@ function App() {
     if (isPreparingQuote) return "Preparing Quote";
     if (isLoadingMax) return "Reading balance";
     if (isExecutingQuote || walletPending) return "Waiting for wallet";
-    if (quoteTransactions.length) return quoteTransactions.length === 1 ? "Swap" : `Swap ${quoteTransactions.length} txs`;
+    if (quoteTransactions.length) return "Swap";
     if (!backend.trade) return "DEX unavailable";
     if (!amount.trim()) return "Enter Amount";
     if (tradeError) return "Retry quote";

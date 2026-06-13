@@ -1806,6 +1806,10 @@ select {
   gap: 8px;
 }
 
+.module-head > .menu-title-row {
+  display: flex;
+}
+
 .menu-title-motion {
   width: 28px;
   height: 28px;
