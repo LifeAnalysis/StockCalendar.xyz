@@ -36,7 +36,25 @@ const CHART_RANGES = [
   { label: "1M", range: "1mo", interval: "1d" },
   { label: "1Y", range: "1y", interval: "1wk" }
 ];
+const SUPPORTED_SWAP_PAYMENT_SYMBOLS = new Set(["WETH"]);
 const AGENT_QUICK_PROMPTS = ["Explain route", "Check Hobin liquidity", "Quant analysis", "Scan news"];
+const AGENT_BOOT_MESSAGE = "I can answer stock questions and prepare wallet-signable transactions.";
+const FRONTEND_ERC20_ABI = [
+  {
+    type: "function",
+    name: "balanceOf",
+    stateMutability: "view",
+    inputs: [{ name: "account", type: "address" }],
+    outputs: [{ name: "balance", type: "uint256" }]
+  },
+  {
+    type: "function",
+    name: "decimals",
+    stateMutability: "view",
+    inputs: [],
+    outputs: [{ name: "decimals", type: "uint8" }]
+  }
+];
 
 const stockPresentation = [
   {
@@ -214,27 +232,19 @@ function splitReasoningText(value) {
     .slice(0, 5);
 }
 
-function cleanHermesText(value) {
-  return String(value || "")
-    .replace(/\*\*/g, "")
-    .replace(/^\s*[-|]\s*/, "")
-    .trim();
+function formatReadableDate(value) {
+  if (!value) return "";
+  const match = String(value).match(/^(\d{4})-(\d{2})-(\d{2})$/);
+  if (!match) return "";
+  const [, year, month, day] = match;
+  const date = new Date(Number(year), Number(month) - 1, Number(day));
+  if (Number.isNaN(date.getTime())) return String(value);
+  const monthName = date.toLocaleDateString("en-US", { month: "long" }).toLowerCase();
+  return `${Number(day)} ${monthName} ${year}`;
 }
 
-function parseHermesReplySections(reply) {
-  const text = String(reply || "").trim();
-  if (!text) return [];
-  const matches = [...text.matchAll(/\*\*(Checked|Final vote|Why|Next)\*\*|(?:^|\n|\s)(Checked|Final vote|Why|Next)\s*:/gi)];
-  if (!matches.length) return [{ title: "Output", body: text }];
-  return matches.map((match, index) => {
-    const title = match[1] || match[2];
-    const start = (match.index || 0) + match[0].length;
-    const end = matches[index + 1]?.index ?? text.length;
-    return {
-      title,
-      body: text.slice(start, end).trim()
-    };
-  });
+function formatReadableDateText(value) {
+  return String(value || "").replace(/\b(\d{4})-(\d{2})-(\d{2})\b/g, (match) => formatReadableDate(match));
 }
 
 function shortenAddress(value) {
@@ -254,6 +264,40 @@ function toBigIntValue(value) {
     return undefined;
   }
   return undefined;
+}
+
+function swapPaymentTokens(tokens) {
+  return (tokens || []).filter((token) => SUPPORTED_SWAP_PAYMENT_SYMBOLS.has(String(token.symbol || "").toUpperCase()));
+}
+
+function formatTokenUnits(rawValue, decimals = 18, maxFractionDigits = 6) {
+  const value = toBigIntValue(rawValue);
+  if (value === undefined) return null;
+  const parsedDecimals = Number(decimals);
+  const safeDecimals = Number.isInteger(parsedDecimals) && parsedDecimals >= 0 ? parsedDecimals : 18;
+  const scale = 10n ** BigInt(safeDecimals);
+  const whole = value / scale;
+  const fraction = value % scale;
+  if (fraction === 0n) return whole.toString();
+
+  const padded = fraction.toString().padStart(safeDecimals, "0");
+  const trimmed = padded.slice(0, maxFractionDigits).replace(/0+$/, "");
+  return trimmed ? `${whole}.${trimmed}` : whole.toString();
+}
+
+function quoteOutputDisplay(quote, targetSymbol) {
+  const payload = quote?.quote;
+  if (!quote?.ok || !payload?.amount_out) return null;
+  const amount = formatTokenUnits(payload.amount_out, payload.output_decimals);
+  return amount ? `${amount} ${payload.output_asset || targetSymbol || ""}`.trim() : null;
+}
+
+function quoteOutputParts(quote, targetSymbol) {
+  const payload = quote?.quote;
+  if (!quote?.ok || !payload?.amount_out) return null;
+  const amount = formatTokenUnits(payload.amount_out, payload.output_decimals);
+  if (!amount) return null;
+  return { amount, asset: payload.output_asset || targetSymbol || "" };
 }
 
 function normalizeTransactionRequest(value, fallbackLabel) {
@@ -441,34 +485,9 @@ function decorateStock(item, index, recommendation, price) {
   };
 }
 
-function buildScoreSentence(components, total) {
-  const contributors = components
-    .filter((component) => component.points > 0)
-    .sort((a, b) => b.points - a.points);
-  const missing = components.filter((component) => !component.present || component.points === 0);
-  if (!contributors.length) {
-    return `Score ${total}/100 - no scored signal cleared its threshold; every component is missing.`;
-  }
-  const joinList = (items) => {
-    if (items.length <= 1) return items.join("");
-    if (items.length === 2) return `${items[0]} and ${items[1]}`;
-    return `${items.slice(0, -1).join(", ")} and ${items[items.length - 1]}`;
-  };
-  const fmt = (component) => `${component.label} (+${component.points})`;
-  const lead = contributors.slice(0, 2).map(fmt);
-  const rest = contributors.slice(2).map(fmt);
-  let contributorPhrase = `led by ${joinList(lead)}`;
-  if (rest.length) contributorPhrase += `, plus ${joinList(rest)}`;
-  const missingPhrase = missing.length
-    ? ` ${joinList(missing.map((component) => component.label))} ${missing.length === 1 ? "is" : "are"} missing.`
-    : "";
-  return `Score ${total}/100 - ${contributorPhrase}.${missingPhrase}`;
-}
-
 function HermesOutputBar({ stock, hermesOutput, loading, progress, overlay = true }) {
   const score = Math.max(0, Math.min(stock.score || 0, 100));
   const decision = hermesOutput?.hermes_decision?.stocks?.find((item) => item.symbol === stock.symbol);
-  const llmStockVote = hermesOutput?.llm_vote?.stocks?.find((item) => item.symbol === stock.symbol);
   const [loadingWordIndex, setLoadingWordIndex] = React.useState(0);
 
   React.useEffect(() => {
@@ -482,31 +501,6 @@ function HermesOutputBar({ stock, hermesOutput, loading, progress, overlay = tru
   const fallbackStance = decision?.action || (score >= 64 ? "WATCH" : "NO_BUY");
   const stance = loading ? HERMES_LOADING_WORDS[loadingWordIndex] : fallbackStance;
   const displayScore = loading ? Math.max(4, Math.min(progress?.percent || 0, 99)) : decision?.confidence || score;
-  const stockReply = hermesOutput?.stock_replies?.[stock.symbol];
-  const stockReplyLines = stockReply
-    ? String(stockReply)
-        .split("\n")
-        .map((line) => line.trim())
-        .filter((line) => line && !line.startsWith(`${stock.symbol}:`) && !line.startsWith(`${stock.symbol} -`))
-    : [];
-  const KEEP_EVIDENCE_LABELS = new Set(["take", "call"]);
-  const stockEvidenceRows = stockReplyLines
-    .filter((line) => !line.startsWith("Next:"))
-    .map((line) => {
-      const splitAt = line.indexOf(":");
-      return splitAt > 0
-        ? { label: line.slice(0, splitAt), value: line.slice(splitAt + 1).trim() }
-        : { label: "Note", value: line };
-    })
-    .filter((row) => KEEP_EVIDENCE_LABELS.has(row.label.trim().toLowerCase()));
-  const stockReplyReason = stockEvidenceRows.map((row) => `${row.label}: ${row.value}`).join("\n");
-  const reasoning =
-    stockReplyReason ||
-    llmStockVote?.reason ||
-    decision?.reason ||
-    (loading ? "Hermes is collecting market, filing, quote, and route evidence before returning a decision." : `${stock.symbol} selected. Contract is ready for Robinhood testnet quote prep.`);
-  const reasoningPoints = splitReasoningText(reasoning);
-  const nextStep = llmStockVote?.user_action || decision?.user_action;
 
   return (
     <div className="cn-card score-card">
@@ -576,29 +570,6 @@ function HermesOutputBar({ stock, hermesOutput, loading, progress, overlay = tru
               </button>
             </div>
           </div>
-          <div className="score-reasoning">
-            <div className="score-reasoning-head">
-              <span>{loading ? "Hermes model running" : `${stock.symbol} final vote`}</span>
-            </div>
-            <div className="reasoning-point-list">
-              {stockEvidenceRows.length
-                ? stockEvidenceRows.map((row) => (
-                    <div className={`stock-evidence-row ${row.label.toLowerCase() === "take" ? "stock-evidence-take" : ""}`} key={`${row.label}-${row.value}`}>
-                      <span>{row.label}</span>
-                      <p>{row.value}</p>
-                    </div>
-                  ))
-                : reasoningPoints.length
-                  ? reasoningPoints.map((point) => <p key={point}>{point}</p>)
-                  : <p>{reasoning}</p>}
-            </div>
-            {!loading && nextStep ? (
-              <div className="stock-next-step">
-                <span>Next</span>
-                <p>{nextStep}</p>
-              </div>
-            ) : null}
-          </div>
         </div>
         {loading ? (
           <div className="thinking-state">
@@ -618,72 +589,8 @@ function HermesOutputBar({ stock, hermesOutput, loading, progress, overlay = tru
   );
 }
 
-function HermesFinalOutput({ hermesOutput, loading }) {
-  const reply = hermesOutput?.reply_source === "openrouter" ? hermesOutput?.reply : "";
-  const niceReply = cleanHermesText(hermesOutput?.nice_reply || hermesOutput?.text_output || "");
-  const sections = parseHermesReplySections(reply);
-  const votes = hermesOutput?.llm_vote?.stocks || hermesOutput?.hermes_decision?.stocks || [];
-  if (loading || (!niceReply && (!reply || !sections.length) && !votes.length)) return null;
-
-  return (
-    <section className="cn-card hermes-final-output" aria-label="Hermes final output">
-      <div className="cn-card-content">
-        <div className="hermes-final-header">
-          <div>
-            <span>Hermes output</span>
-            <h3>Final vote</h3>
-          </div>
-        </div>
-        {niceReply ? (
-          <div className="hermes-nice-output">
-            <p>{niceReply}</p>
-          </div>
-        ) : null}
-        {sections.length ? (
-          <div className="hermes-final-sections">
-            {sections.map((section) => {
-              const title = cleanHermesText(section.title);
-              const lines = section.body
-                .split("\n")
-                .map(cleanHermesText)
-                .filter((line) => line && !/^\|[-\s|]+\|?$/.test(line) && !/^stock\s*\|/i.test(line));
-              const showVotes = title.toLowerCase() === "final vote" && votes.length;
-              return (
-                <article key={title} className="hermes-final-section">
-                  <h4>{title}</h4>
-                  {showVotes ? (
-                    <div className="hermes-vote-grid">
-                      {votes.map((vote) => (
-                        <div key={vote.symbol} className="hermes-vote-row">
-                          <strong>{vote.symbol}</strong>
-                          <span>{vote.action}</span>
-                          <small>{vote.confidence}/100</small>
-                        </div>
-                      ))}
-                    </div>
-                  ) : (
-                    <div className="hermes-final-copy">
-                      {lines.map((line) => <p key={line}>{line}</p>)}
-                    </div>
-                  )}
-                </article>
-              );
-            })}
-          </div>
-        ) : votes.length ? (
-          <div className="hermes-vote-grid" aria-label="Stock votes">
-            {votes.map((vote) => (
-              <div key={vote.symbol} className="hermes-vote-row">
-                <strong>{vote.symbol}</strong>
-                <span>{vote.action}</span>
-                <small>{vote.confidence}/100</small>
-              </div>
-            ))}
-          </div>
-        ) : null}
-      </div>
-    </section>
-  );
+function HermesFinalOutput() {
+  return null;
 }
 
 function formatNumber(value) {
@@ -706,16 +613,20 @@ function formatConfidence(value) {
 
 function formatEarningsDate(value) {
   if (!value) return "n/a";
+  const formatted = formatReadableDate(value);
+  if (formatted) return formatted;
   const date = new Date(`${value}T12:00:00`);
   if (Number.isNaN(date.getTime())) return value;
-  return date.toLocaleDateString("en-US", { month: "short", day: "numeric", year: "numeric" });
+  return `${date.getDate()} ${date.toLocaleDateString("en-US", { month: "long" }).toLowerCase()} ${date.getFullYear()}`;
 }
 
 function formatDateTime(value) {
   if (!value) return "n/a";
+  const formatted = formatReadableDate(value);
+  if (formatted) return formatted;
   const date = new Date(value);
   if (Number.isNaN(date.getTime())) return value;
-  return date.toLocaleDateString("en-US", { month: "short", day: "numeric", year: "numeric" });
+  return `${date.getDate()} ${date.toLocaleDateString("en-US", { month: "long" }).toLowerCase()} ${date.getFullYear()}`;
 }
 
 function formatKalshiVolume(value) {
@@ -903,7 +814,6 @@ function EarningsBacktestTable({ stock, backtest, loading }) {
                     <th>Move</th>
                     <th>Benchmark</th>
                     <th>Kalshi</th>
-                    <th>News</th>
                     <th>Hermes read</th>
                   </tr>
                 </thead>
@@ -926,10 +836,6 @@ function EarningsBacktestTable({ stock, backtest, loading }) {
                       <td>
                         <strong>{row.kalshi?.matched ? `${row.kalshi.market_count} match${row.kalshi.market_count === 1 ? "" : "es"}` : "No match"}</strong>
                         <small>{row.kalshi?.top_market?.ticker || "Public feed did not return a usable historic market"}</small>
-                      </td>
-                      <td>
-                        <strong>{row.news?.article_count || 0} articles</strong>
-                        <small>{row.news?.top_headlines?.[0] || "No bounded headline returned"}</small>
                       </td>
                       <td>{row.analysis}</td>
                     </tr>
@@ -1028,9 +934,11 @@ function scoreComponentNote(key, ctx) {
     case "calendar":
       return calendar?.ok ? "Calendar feed returned earnings context." : "Calendar feed did not return a clean event.";
     case "price":
-      return price?.ok ? `Quote date ${price.date || "unknown"}` : "No clean latest quote.";
+      return price?.ok ? `Quote date ${formatReadableDateText(price.date || "unknown")}` : "No clean latest quote.";
     case "filing":
-      return filing?.latest_material?.form ? `Latest filing ${filing.latest_material.form}` : "No recent SEC filing signal.";
+      return filing?.latest_material?.form
+        ? formatReadableDateText(`Latest filing ${filing.latest_material.form}${filing.latest_material.filing_date ? ` filed ${filing.latest_material.filing_date}` : ""}`)
+        : "No recent SEC filing signal.";
     case "news":
       return news?.article_count ? `${news.article_count} recent news item(s)` : "No clean news signal.";
     case "matches":
@@ -1042,7 +950,7 @@ function scoreComponentNote(key, ctx) {
 
 function ConfidenceDecomposition({ stock, hermesOutput, overlay = true, onToggleOverlay }) {
   const ctx = getHermesContext(stock, hermesOutput);
-  const { decision, explorerConfirmed } = ctx;
+  const { decision } = ctx;
   const symbol = stock?.symbol;
 
   const [expandedSegment, setExpandedSegment] = React.useState(null);
@@ -1102,17 +1010,6 @@ function ConfidenceDecomposition({ stock, hermesOutput, overlay = true, onToggle
     percent: Math.round((component.adjustedPoints / contributionTotal) * 100),
   }));
   const selectedSegment = segments.find((segment) => segment.key === expandedSegment);
-  const adjustedSentence = buildScoreSentence(
-    components.map((component) => ({ ...component, points: component.adjustedPoints })),
-    adjustedTotal,
-  );
-  const headlineSentence = weightsDirty ? adjustedSentence : decision?.score_explanation;
-
-  const readinessFactors = [
-    { label: "Route", note: stock?.address ? "Official Robinhood Chain stock token contract exists." : "No official stock token route is available." },
-    { label: "Explorer", note: explorerConfirmed ? "Contract found in Robinhood Chain explorer discovery." : "Explorer confirmation not found yet." }
-  ];
-
   if (!components.length) return null;
 
   return (
@@ -1125,7 +1022,6 @@ function ConfidenceDecomposition({ stock, hermesOutput, overlay = true, onToggle
             {weightsDirty ? <small className="score-why-adjusted">· adjusted</small> : null}
           </span>
         </div>
-        {headlineSentence ? <p className="score-why-sentence">{headlineSentence}</p> : null}
         <div className="confidence-category-stack">
           <div aria-label="Hermes confidence category bar">
             <div className="confidence-category-bar">
@@ -1234,25 +1130,13 @@ function ConfidenceDecomposition({ stock, hermesOutput, overlay = true, onToggle
               </article>
             ))}
           </div>
-          <span className="font-medium">Route readiness</span>
-          <div className="confidence-summary-grid">
-            {readinessFactors.map((factor) => (
-              <article key={factor.label}>
-                <span>{factor.label}</span>
-                <p>{factor.note}</p>
-              </article>
-            ))}
-          </div>
-          <small className="confidence-formula-note">
-            Formula: up to 45 Kalshi market quality + 15 calendar + 15 latest quote + 15 SEC filing + up to 10 news + up to 10 Kalshi breadth, capped at 95. Route and explorer checks are readiness, not confidence.
-          </small>
         </div>
       </div>
     </div>
   );
 }
 
-function PredictionMarketOverlay({ stock, hermesOutput }) {
+function PredictionMarketOverlay({ stock, hermesOutput, loading }) {
   const { kalshi } = getHermesContext(stock, hermesOutput);
   const markets = (kalshi?.markets || []).slice(0, 3);
 
@@ -1267,7 +1151,26 @@ function PredictionMarketOverlay({ stock, hermesOutput }) {
           </h3>
         </div>
       </div>
-      {markets.length ? (
+      {loading ? (
+        <div className="market-stack market-stack-loading" aria-live="polite" aria-busy="true">
+          {[0, 1, 2].map((item) => (
+            <article className="market-row market-row-loading" key={item}>
+              <div className="market-title-skeleton"></div>
+              <div className="market-card-layout">
+                <div className="market-probability-card market-probability-loading">
+                  <span>Loading</span>
+                  <strong>--</strong>
+                </div>
+                <div className="market-meta-grid market-meta-loading">
+                  <div></div>
+                  <div></div>
+                  <div></div>
+                </div>
+              </div>
+            </article>
+          ))}
+        </div>
+      ) : markets.length ? (
         <div className="market-stack">
           {markets.map((market) => {
             const yesProbability = averagePricePercent(market.yes_bid_dollars, market.yes_ask_dollars);
@@ -1284,7 +1187,7 @@ function PredictionMarketOverlay({ stock, hermesOutput }) {
                   </a>
                 </div>
                 <div className="market-card-layout">
-                  <div className="market-probability-card">
+                  <div className={`market-probability-card ${bestSide === "NO" ? "market-side-no" : "market-side-yes"}`}>
                     <span>{bestSide}</span>
                     <strong>{bestProbability !== null ? `${bestProbability}%` : "n/a"}</strong>
                   </div>
@@ -1353,7 +1256,10 @@ function previewHermesOutput(intel) {
 }
 
 function PostTradeJournal({ entries, stock }) {
-  const visibleEntries = entries.filter((entry) => !stock || entry.symbol === stock.symbol).slice(0, 6);
+  const visibleEntries = entries
+    .filter((entry) => entry.status === "tx_confirmed")
+    .filter((entry) => !stock || entry.symbol === stock.symbol)
+    .slice(0, 6);
 
   return (
     <section className="hermes-module journal-view" aria-label="Post-trade journal">
@@ -1365,28 +1271,35 @@ function PostTradeJournal({ entries, stock }) {
       </div>
       {visibleEntries.length ? (
         <div className="journal-stack">
-          {visibleEntries.map((entry) => (
-            <article className="journal-entry" key={entry.id}>
-              <div>
-                <span>{entry.status}</span>
-                <time>{new Date(entry.timestamp).toLocaleString()}</time>
-              </div>
-              <p>{entry.side?.toUpperCase()} {entry.amount || "0"} {entry.sourceSymbol} → {entry.targetSymbol}</p>
-              <small>
-                Hermes {entry.hermesAction || "n/a"} · {formatConfidence(entry.hermesConfidence)}
-              </small>
-              {entry.hashes?.length ? (
-                <div className="journal-links">
-                  {entry.hashes.map((hash) => (
-                    <a key={hash} href={`${ROBINHOOD_CHAIN_EXPLORER}/tx/${hash}`} target="_blank" rel="noreferrer">{shortenAddress(hash)}</a>
-                  ))}
+          {visibleEntries.map((entry) => {
+            const sideLabel = entry.side?.toUpperCase() || "TRADE";
+            const tradeTitle = entry.outputAmount
+              ? `${sideLabel} ${entry.amount || "0"} ${entry.sourceSymbol || ""} → for ${entry.outputAmount}`.trim()
+              : `${sideLabel} ${entry.amount || "0"} ${entry.sourceSymbol || ""} → ${entry.targetSymbol || ""}`.trim();
+            const explorerHash = entry.hashes?.[entry.hashes.length - 1];
+
+            return (
+              <article className="journal-entry" key={entry.id}>
+                <div className="journal-entry-head">
+                  <div className="journal-title-row">
+                    <strong>{tradeTitle}</strong>
+                    <span>Hermes {entry.hermesAction || "n/a"} · {formatConfidence(entry.hermesConfidence)}</span>
+                  </div>
+                  <time>{new Date(entry.timestamp).toLocaleString()}</time>
                 </div>
-              ) : null}
-            </article>
-          ))}
+                {explorerHash ? (
+                  <div className="journal-links">
+                    <a className="journal-explorer-button" href={`${ROBINHOOD_CHAIN_EXPLORER}/tx/${explorerHash}`} target="_blank" rel="noreferrer">
+                      Explorer
+                    </a>
+                  </div>
+                ) : null}
+              </article>
+            );
+          })}
         </div>
       ) : (
-        <p className="empty-module-note">Quote prep and confirmed wallet transactions will appear here with the Hermes evidence snapshot.</p>
+        <p className="empty-module-note">Confirmed wallet transactions will appear here with the Hermes evidence snapshot.</p>
       )}
     </section>
   );
@@ -1506,14 +1419,7 @@ function EarningsCalendar({ events, stocks, monthDate, onMonthChange, onSelectSt
   );
 }
 
-function HermesAgentPanel({ messages, input, busy, context, onInputChange, onSend, onQuickPrompt, onAction }) {
-  const chips = [
-    context.stock ? context.stock.symbol : "No stock",
-    context.connected ? "Wallet connected" : "No wallet",
-    context.connectedToRobinhood ? "Robinhood Chain" : "Wrong network",
-    context.quoteReady ? "Quote ready" : "No quote"
-  ];
-
+function HermesAgentPanel({ messages, input, busy, onInputChange, onSend, onQuickPrompt, onAction }) {
   return (
     <section className="panel agent-panel" aria-label="Hermes Agent chat">
       <div className="agent-header">
@@ -1522,11 +1428,6 @@ function HermesAgentPanel({ messages, input, busy, context, onInputChange, onSen
           <h2>Route copilot</h2>
         </div>
         <span className={`agent-live-dot ${busy ? "thinking" : ""}`} aria-hidden="true" />
-      </div>
-      <div className="agent-context-row" aria-label="Agent context">
-        {chips.map((chip) => (
-          <span key={chip}>{chip}</span>
-        ))}
       </div>
       <div className="agent-thread" aria-live="polite">
         {messages.map((message) => (
@@ -1582,6 +1483,7 @@ function App() {
   const publicClient = usePublicClient({ chainId: ROBINHOOD_CHAIN_ID });
   const { sendTransactionAsync, isPending: walletPending } = useSendTransaction();
   const swapShellRef = React.useRef(null);
+  const quoteRequestRef = React.useRef("");
 
   const [selected, setSelected] = React.useState("TSLA");
   const [side, setSide] = React.useState("buy");
@@ -1609,13 +1511,15 @@ function App() {
   const [txHashes, setTxHashes] = React.useState([]);
   const [isPreparingQuote, setIsPreparingQuote] = React.useState(false);
   const [isExecutingQuote, setIsExecutingQuote] = React.useState(false);
+  const [isLoadingMax, setIsLoadingMax] = React.useState(false);
+  const [tradeConfirmation, setTradeConfirmation] = React.useState(null);
   const [journalEntries, setJournalEntries] = React.useState([]);
   const [overlayBySymbol, setOverlayBySymbol] = React.useState({});
   const [agentMessages, setAgentMessages] = React.useState(() => [
     {
       id: "agent-boot",
       role: "assistant",
-      content: "I can explain the selected route, compare the desk, check Hobin liquidity, or prepare wallet-signable quote calldata."
+      content: AGENT_BOOT_MESSAGE
     }
   ]);
   const [agentInput, setAgentInput] = React.useState("");
@@ -1634,9 +1538,7 @@ function App() {
   const payToken = payTokens.find((token) => token.symbol === payTokenSymbol) || payTokens[0];
   const sourceToken = side === "sell" ? stock : payToken;
   const targetToken = side === "sell" ? payToken : stock;
-  const amountNumber = Number(amount || 0);
-  const selectedScore = stock ? stock.score : 0;
-  const estimatedOutput = stock && amountNumber > 0 ? (amountNumber / Math.max(stock.score, 1)).toFixed(6) : "0";
+  const quotedOutput = quoteOutputDisplay(quote, targetToken?.symbol);
   const selectedChartData = stock ? charts[stock.symbol] || [] : [];
   const wallet = address || "";
   const connectedToRobinhood = Number(chainId) === ROBINHOOD_CHAIN_ID;
@@ -1727,7 +1629,13 @@ function App() {
         setStocks(nextStocks);
         nextBackend.intel = true;
       }
-      if (loadedTokens.length) setPayTokens(loadedTokens);
+      if (loadedTokens.length) {
+        const supportedPayTokens = swapPaymentTokens(loadedTokens);
+        setPayTokens(supportedPayTokens);
+        if (!supportedPayTokens.some((token) => token.symbol === payTokenSymbol)) {
+          setPayTokenSymbol(supportedPayTokens[0]?.symbol || "");
+        }
+      }
     }
 
     async function loadBackend() {
@@ -1757,8 +1665,11 @@ function App() {
           if (!nextStocks.some((item) => item.symbol === selected)) setSelected(nextStocks[0]?.symbol || "");
         }
         if (loadedTokens.length) {
-          setPayTokens(loadedTokens);
-          if (!loadedTokens.some((token) => token.symbol === payTokenSymbol)) setPayTokenSymbol(loadedTokens[0]?.symbol || "");
+          const supportedPayTokens = swapPaymentTokens(loadedTokens);
+          setPayTokens(supportedPayTokens);
+          if (!supportedPayTokens.some((token) => token.symbol === payTokenSymbol)) {
+            setPayTokenSymbol(supportedPayTokens[0]?.symbol || "");
+          }
         }
       } catch (error) {
         console.warn("Robinhood stock API unavailable", error);
@@ -1859,6 +1770,33 @@ function App() {
   }, [selected, payTokenSymbol, side, amount]);
 
   React.useEffect(() => {
+    const cleanAmount = amount.trim();
+    if (!isConnected || !connectedToRobinhood || !backend.trade || !stock || !payToken || !wallet || !cleanAmount) return undefined;
+    if (!Number.isFinite(Number(cleanAmount)) || Number(cleanAmount) <= 0) return undefined;
+
+    const isSell = side === "sell";
+    const payload = {
+      action: side,
+      source_asset: isSell ? stock.address : payToken.address,
+      target_asset: isSell ? payToken.address : stock.address,
+      amount: cleanAmount,
+      wallet_address: wallet,
+      provider: "auto",
+      strategy: `Hermes Robinhood Chain ${side} route for ${stock.symbol}`
+    };
+    const requestKey = JSON.stringify(payload);
+    const timer = window.setTimeout(() => {
+      prepareQuoteFromPayload(payload, { journal: false, requestKey });
+    }, 450);
+
+    return () => {
+      window.clearTimeout(timer);
+      if (quoteRequestRef.current === requestKey) quoteRequestRef.current = "";
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [amount, backend.trade, connectedToRobinhood, isConnected, payToken?.address, side, stock?.address, stock?.symbol, wallet]);
+
+  React.useEffect(() => {
     try {
       const stored = window.localStorage.getItem(JOURNAL_STORAGE_KEY);
       if (stored) setJournalEntries(JSON.parse(stored));
@@ -1880,7 +1818,11 @@ function App() {
       const stored = window.localStorage.getItem(AGENT_STORAGE_KEY);
       if (stored) {
         const parsed = JSON.parse(stored);
-        if (Array.isArray(parsed) && parsed.length) setAgentMessages(parsed.slice(-20));
+        if (Array.isArray(parsed) && parsed.length) {
+          setAgentMessages(parsed.slice(-20).map((message) => (
+            message?.id === "agent-boot" ? { ...message, content: AGENT_BOOT_MESSAGE } : message
+          )));
+        }
       }
     } catch (error) {
       console.warn("Unable to load Hermes Agent chat", error);
@@ -1944,6 +1886,7 @@ function App() {
         ok: extra.quote.ok,
         message: extra.quote.message || extra.quote.error || null
       } : null,
+      outputAmount: quoteOutputDisplay(extra.quote || quote, targetToken?.symbol),
       hashes: extra.hashes || []
     };
     setJournalEntries((current) => [entry, ...current].slice(0, 50));
@@ -1962,6 +1905,51 @@ function App() {
     setTradeError("");
     setTradeStatus("Requesting Robinhood Chain in wallet...");
     await switchNetwork(robinhoodChain);
+  }
+
+  async function applyMaxAmount() {
+    if (!isConnected) {
+      await connectWallet();
+      return;
+    }
+    if (!connectedToRobinhood) {
+      await switchToRobinhood();
+      return;
+    }
+    if (!publicClient || !wallet || !sourceToken) {
+      setTradeError("Wallet balance is not available yet.");
+      return;
+    }
+
+    setIsLoadingMax(true);
+    setTradeError("");
+    try {
+      const isBuy = side === "buy";
+      const decimals = isBuy
+        ? 18
+        : Number(await publicClient.readContract({
+            address: sourceToken.address,
+            abi: FRONTEND_ERC20_ABI,
+            functionName: "decimals"
+          }));
+      const rawBalance = isBuy
+        ? await publicClient.getBalance({ address: wallet })
+        : await publicClient.readContract({
+            address: sourceToken.address,
+            abi: FRONTEND_ERC20_ABI,
+            functionName: "balanceOf",
+            args: [wallet]
+          });
+      const spendableBalance = isBuy ? rawBalance - rawBalance / 100n : rawBalance;
+      const safeBalance = spendableBalance > 0n ? spendableBalance : 0n;
+      const formatted = formatTokenUnits(safeBalance, decimals, 18) || "0";
+      setAmount(formatted);
+      setTradeStatus(`Max ${sourceToken.symbol} amount loaded.`);
+    } catch (error) {
+      setTradeError(`Could not read ${sourceToken.symbol} balance: ${error?.shortMessage || error?.message || "unknown error"}`);
+    } finally {
+      setIsLoadingMax(false);
+    }
   }
 
   async function executeQuoteTransactions() {
@@ -1990,7 +1978,16 @@ function App() {
       }
       setTradeStatus("Swap transaction confirmed on Robinhood Chain.");
       setQuoteTransactions([]);
-      appendJournalEntry("tx_confirmed", { hashes });
+      appendJournalEntry("tx_confirmed", { hashes, quote });
+      const output = quoteOutputParts(quote, targetToken?.symbol);
+      const finalHash = hashes[hashes.length - 1];
+      setTradeConfirmation({
+        amount: output?.amount || "",
+        asset: output?.asset || targetToken?.symbol || "",
+        side,
+        hash: finalHash,
+        explorerUrl: finalHash ? `${ROBINHOOD_CHAIN_EXPLORER}/tx/${finalHash}` : ""
+      });
     } catch (error) {
       setTradeError(error?.shortMessage || error?.message || "Wallet transaction failed.");
     } finally {
@@ -1998,7 +1995,9 @@ function App() {
     }
   }
 
-  async function prepareQuoteFromPayload(payload) {
+  async function prepareQuoteFromPayload(payload, options = {}) {
+    const requestKey = options.requestKey || JSON.stringify(payload);
+    quoteRequestRef.current = requestKey;
     setIsPreparingQuote(true);
     setTradeError("");
     setTradeStatus("Preparing quote...");
@@ -2009,6 +2008,7 @@ function App() {
         body: JSON.stringify(payload)
       });
       const prepared = await readJsonResponse(res);
+      if (quoteRequestRef.current !== requestKey) return null;
       if (!res.ok || !prepared) {
         setTradeError(`Quote request failed with status ${res.status}.`);
         return null;
@@ -2017,24 +2017,20 @@ function App() {
         setQuote(prepared);
         setQuoteTransactions([]);
         setTradeError(prepared.message || prepared.error || "Quote request was rejected.");
-        appendJournalEntry("quote_rejected", { quote: prepared });
+        if (options.journal !== false) appendJournalEntry("quote_rejected", { quote: prepared });
         return prepared;
       }
       const transactions = extractTransactionRequests(prepared);
       setQuote(prepared);
       setQuoteTransactions(transactions);
-      setTradeStatus(
-        transactions.length
-          ? `Quote ready. ${transactions.length === 1 ? "Sign the swap transaction" : `Sign ${transactions.length} wallet transactions`}.`
-          : "Quote prepared, but the response did not include an executable wallet transaction."
-      );
-      appendJournalEntry(transactions.length ? "quote_ready" : "quote_prepared", { quote: prepared });
+      setTradeStatus(transactions.length ? "" : "Quote prepared, but the response did not include an executable wallet transaction.");
       return prepared;
     } catch (error) {
+      if (quoteRequestRef.current !== requestKey) return null;
       setTradeError(`Quote request failed: ${error.message}`);
       return null;
     } finally {
-      setIsPreparingQuote(false);
+      if (quoteRequestRef.current === requestKey) setIsPreparingQuote(false);
     }
   }
 
@@ -2114,8 +2110,7 @@ function App() {
       const transactions = extractTransactionRequests(prepared);
       setQuote(prepared);
       setQuoteTransactions(transactions);
-      setTradeStatus(transactions.length ? "Quote loaded. Review and sign from wallet." : "Quote loaded without executable wallet transaction.");
-      appendJournalEntry(transactions.length ? "quote_ready" : "quote_prepared", { quote: prepared });
+      setTradeStatus(transactions.length ? "" : "Quote loaded without executable wallet transaction.");
       return;
     }
     if (action.type === "prepare_quote") {
@@ -2171,10 +2166,13 @@ function App() {
     if (!isConnected) return "Connect wallet";
     if (!connectedToRobinhood) return "Switch to Robinhood";
     if (isPreparingQuote) return "Preparing quote";
+    if (isLoadingMax) return "Reading balance";
     if (isExecutingQuote || walletPending) return "Waiting for wallet";
     if (quoteTransactions.length) return quoteTransactions.length === 1 ? "Sign swap" : `Sign ${quoteTransactions.length} txs`;
     if (!backend.trade) return "DEX unavailable";
-    return "Prepare quote";
+    if (!amount.trim()) return "Enter amount";
+    if (tradeError) return "Retry quote";
+    return "Waiting for quote";
   }
 
   function selectToken(kind, item) {
@@ -2248,10 +2246,15 @@ function App() {
                     accent={side === "buy"}
                     onClick={() => toggleTokenPicker(side === "sell" ? "stock" : "pay")}
                   />
-                  <label className="amount-entry">
-                    <input inputMode="decimal" aria-label="Trade amount" placeholder="0" value={amount} onChange={(event) => setAmount(event.target.value)} />
-                    <span>${amountNumber ? amountNumber.toLocaleString() : "0"}</span>
-                  </label>
+                  <div className="amount-entry">
+                    <div className="amount-input-row">
+                      <input inputMode="decimal" aria-label="Trade amount" placeholder="0" value={amount} onChange={(event) => setAmount(event.target.value)} />
+                      <button className="amount-max-button" type="button" onClick={applyMaxAmount} disabled={isLoadingMax || walletPending}>
+                        {isLoadingMax ? "..." : "Max"}
+                      </button>
+                    </div>
+                    <span>{sourceToken?.symbol ? `${sourceToken.symbol} amount` : "Token amount"}</span>
+                  </div>
                 </div>
 
                 <button
@@ -2270,8 +2273,8 @@ function App() {
                     onClick={() => toggleTokenPicker(side === "sell" ? "pay" : "stock")}
                   />
                   <div className="amount-entry readout" aria-label="Estimated output amount">
-                    <strong>{stock && amountNumber ? estimatedOutput : "0"}</strong>
-                    <span>${stock && amountNumber ? Math.max(amountNumber * selectedScore * 0.01, 0).toFixed(2) : "0"}</span>
+                    <strong>{quotedOutput || "-"}</strong>
+                    {isPreparingQuote || !quote?.ok ? <span>{isPreparingQuote ? "Fetching quote" : "Auto quote"}</span> : null}
                   </div>
                 </div>
               </div>
@@ -2316,17 +2319,15 @@ function App() {
                     </button>
                   )}
                 </div>
-                {isConnected && (
+                {isConnected && !connectedToRobinhood && (
                   <div className={`network-row ${connectedToRobinhood ? "ready" : ""}`}>
-                    <span>{connectedToRobinhood ? "Robinhood Chain" : "Wrong network"}</span>
-                    {!connectedToRobinhood && (
-                      <button type="button" onClick={switchToRobinhood}>
-                        Switch
-                      </button>
-                    )}
+                    <span>Wrong network</span>
+                    <button type="button" onClick={switchToRobinhood}>
+                      Switch
+                    </button>
                   </div>
                 )}
-                {(tradeStatus || tradeError || txHashes.length > 0 || quote) && (
+                {(tradeStatus || tradeError || txHashes.length > 0) && (
                   <div className={`quote-status ${tradeError ? "error" : ""}`}>
                     {tradeError || tradeStatus}
                     {txHashes.length > 0 && (
@@ -2343,7 +2344,7 @@ function App() {
               </div>
 
               {isConnected ? (
-                <button className="swap-submit" type="submit" disabled={tradeBusy || !isReownConfigured}>
+                <button className="swap-submit" type="submit" disabled={tradeBusy || isLoadingMax || !isReownConfigured}>
                   <MotionAsset src="/media/icons/wallet-connect-orb.mp4" webmSrc="/media/icons/wallet-connect-orb.webm" className="submit-motion" />
                   <span>{submitLabel()}</span>
                 </button>
@@ -2356,7 +2357,6 @@ function App() {
             messages={agentMessages}
             input={agentInput}
             busy={agentBusy}
-            context={{ stock, connected: isConnected, connectedToRobinhood, quoteReady: quoteTransactions.length > 0 }}
             onInputChange={setAgentInput}
             onSend={handleAgentSubmit}
             onQuickPrompt={sendAgentMessage}
@@ -2364,6 +2364,7 @@ function App() {
           />
 
           <section className="panel stock-section">
+            <div className="stock-section-title">Deep Dive Stocks</div>
             <div className="stocks-grid">
               {stocks.map((item) => (
                 <article className={`stock-card ${item.symbol === selected ? "active" : ""}`} key={item.symbol}>
@@ -2389,6 +2390,7 @@ function App() {
             onMonthChange={setCalendarMonth}
             onSelectStock={openStockDetails}
           />
+          <PostTradeJournal entries={journalEntries} stock={stock} />
         </section>
 
         {stock && detailsOpen && (
@@ -2417,13 +2419,36 @@ function App() {
               <ConfidenceDecomposition stock={stock} hermesOutput={hermesOutput} overlay={hermesOverlayOn} onToggleOverlay={setHermesOverlay} />
               <HermesReasoningGraph stock={stock} hermesOutput={hermesOutput} loading={hermesLoading} />
               <EarningsBacktestTable stock={stock} backtest={backtests[stock.symbol]} loading={backtestStatus === "loading" && !backtests[stock.symbol]} />
-              <PredictionMarketOverlay stock={stock} hermesOutput={hermesOutput} />
+              <PredictionMarketOverlay stock={stock} hermesOutput={hermesOutput} loading={hermesLoading} />
               <DataProvenanceView hermesOutput={hermesOutput} />
-              <PostTradeJournal entries={journalEntries} stock={stock} />
             </div>
           </section>
         )}
       </main>
+      {tradeConfirmation ? (
+        <div className="trade-confirmation-backdrop" role="presentation">
+          <section className="trade-confirmation-modal" role="dialog" aria-modal="true" aria-label="Swap confirmed">
+            <div className="trade-confirmation-head">
+              <div>
+                <span>Swap confirmed</span>
+                <h3>{tradeConfirmation.side === "buy" ? "Asset bought" : "Asset received"}</h3>
+              </div>
+              <button type="button" aria-label="Close confirmation" onClick={() => setTradeConfirmation(null)}>
+                <XIcon />
+              </button>
+            </div>
+            <div className="trade-confirmation-amount">
+              <strong>{tradeConfirmation.amount || "-"}</strong>
+              <span>{tradeConfirmation.asset || "Asset"}</span>
+            </div>
+            {tradeConfirmation.explorerUrl ? (
+              <a className="trade-confirmation-link" href={tradeConfirmation.explorerUrl} target="_blank" rel="noreferrer">
+                View transaction {shortenAddress(tradeConfirmation.hash)}
+              </a>
+            ) : null}
+          </section>
+        </div>
+      ) : null}
       <footer className="app-footer">
         <a href="https://github.com/LifeAnalysis" target="_blank" rel="noreferrer">
           <GithubIcon />

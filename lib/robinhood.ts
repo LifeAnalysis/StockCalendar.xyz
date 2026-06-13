@@ -571,6 +571,8 @@ async function prepareHobinTrade(input: StockTradeInput) {
       quote: {
         input_asset: "ETH",
         output_asset: stock.symbol,
+        input_decimals: 18,
+        output_decimals: decimals,
         amount_in: amountIn.toString(),
         amount_out: amountOut.toString(),
         min_amount_out: minAmountOut.toString(),
@@ -604,6 +606,8 @@ async function prepareHobinTrade(input: StockTradeInput) {
     quote: {
       input_asset: stock.symbol,
       output_asset: "ETH",
+      input_decimals: decimals,
+      output_decimals: 18,
       amount_in: amountIn.toString(),
       amount_out: amountOut.toString(),
       min_amount_out: minAmountOut.toString(),
@@ -695,6 +699,8 @@ async function prepareRhSwapTrade(input: StockTradeInput) {
       quote: {
         input_asset: "ETH",
         output_asset: stock.symbol,
+        input_decimals: 18,
+        output_decimals: decimals,
         amount_in: amountIn.toString(),
         amount_out: tokensOut.toString(),
         min_amount_out: minTokensOut.toString(),
@@ -723,6 +729,8 @@ async function prepareRhSwapTrade(input: StockTradeInput) {
     quote: {
       input_asset: stock.symbol,
       output_asset: "ETH",
+      input_decimals: decimals,
+      output_decimals: 18,
       amount_in: amountIn.toString(),
       amount_out: ethOut.toString(),
       min_amount_out: minEthOut.toString(),

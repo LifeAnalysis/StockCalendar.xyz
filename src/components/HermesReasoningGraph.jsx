@@ -18,6 +18,21 @@ function compactText(value, fallback = "n/a") {
   return text.length > 150 ? `${text.slice(0, 147)}...` : text;
 }
 
+function formatReadableDate(value) {
+  if (!value) return "";
+  const match = String(value).match(/^(\d{4})-(\d{2})-(\d{2})$/);
+  if (!match) return "";
+  const [, year, month, day] = match;
+  const date = new Date(Number(year), Number(month) - 1, Number(day));
+  if (Number.isNaN(date.getTime())) return String(value);
+  const monthName = date.toLocaleDateString("en-US", { month: "long" }).toLowerCase();
+  return `${Number(day)} ${monthName} ${year}`;
+}
+
+function formatEvidenceText(value) {
+  return String(value || "").replace(/\b(\d{4})-(\d{2})-(\d{2})\b/g, (match) => formatReadableDate(match));
+}
+
 function firstUrl(value) {
   const match = String(value || "").match(/https?:\/\/[^\s]+/);
   return match ? match[0] : null;
@@ -39,7 +54,6 @@ function describeNode(node) {
   if (!node) return "";
   if (node.description) return node.description;
   const label = node.label || "This node";
-  const detail = node.detail || "No additional source detail is available yet.";
   const descriptions = {
     decision: `${label} is Hermes' current stance for the selected stock. It combines route readiness with public quote, filing, calendar, Kalshi, and source-health evidence.`,
     route: `${label} confirms whether the selected stock has an official Robinhood Chain contract that Hermes is allowed to route against.`,
@@ -48,7 +62,7 @@ function describeNode(node) {
     risk: `${label} marks degraded or missing context that should lower confidence until the source recovers.`,
     missing: `${label} shows evidence Hermes expected but could not cleanly load for this stock.`
   };
-  return `${descriptions[node.type] || descriptions.source} ${detail}`;
+  return descriptions[node.type] || descriptions.source;
 }
 
 function NodeDetailPanel({ node }) {
@@ -57,11 +71,11 @@ function NodeDetailPanel({ node }) {
     <aside className="reasoning-node-panel" aria-live="polite" aria-label="Selected evidence node details">
       <span>{node?.typeLabel || "Evidence"}</span>
       <strong>{node?.label || "Select a node"}</strong>
-      <p>{describeNode(node)}</p>
+      <p>{formatEvidenceText(describeNode(node))}</p>
       {detailPoints.length ? (
         <div className="reasoning-node-detail-list">
           {detailPoints.map((point) => (
-            <p key={point}>{point}</p>
+            <p key={point}>{formatEvidenceText(point)}</p>
           ))}
         </div>
       ) : null}
@@ -75,7 +89,7 @@ function NodeDetailPanel({ node }) {
 }
 
 function splitDetail(value) {
-  const text = String(value || "").trim();
+  const text = formatEvidenceText(value).trim();
   if (!text) return [];
   return text
     .split(/(?: · |;\s+|\.\s+)/)
@@ -226,7 +240,7 @@ function buildGraph(stock, hermesOutput, loading) {
       id: "price",
       type: "source",
       label: "Public quote",
-      detail: `${price.source || "stock quote"} · close ${price.close ?? "n/a"}${price.date ? ` · ${price.date}` : ""}`,
+      detail: `${price.source || "stock quote"} · close ${price.close ?? "n/a"}${price.date ? ` · ${formatReadableDate(price.date)}` : ""}`,
       href: "https://stooq.com/q/l/"
     });
     addEdge(edges, "price", "decision", "prices", "positive");
@@ -286,7 +300,7 @@ function buildGraph(stock, hermesOutput, loading) {
       id: "calendar",
       type: "signal",
       label: "Earnings window",
-      detail: calendar?.earnings_dates?.length ? `Next date: ${calendar.earnings_dates[0]}` : "Calendar fallback links are available.",
+      detail: calendar?.earnings_dates?.length ? `Next date: ${formatReadableDate(calendar.earnings_dates[0])}` : "Calendar fallback links are available.",
       href: calendar?.public_links?.[0]
     });
     addEdge(edges, "calendar", "decision", "event timing", "neutral");
