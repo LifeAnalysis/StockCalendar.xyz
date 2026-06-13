@@ -110,11 +110,12 @@ const stockPresentation = [
 ];
 
 function Logo({ stock }) {
+  const label = stock.name || stock.symbol || "Asset";
   return (
     <span
       className={`logo ${stock.logoUrl ? "image-logo" : ""}`}
       role="img"
-      aria-label={`${stock.name} logo`}
+      aria-label={`${label} logo`}
       style={{ "--logo-bg": stock.logoBg || "#fff", "--logo-fg": stock.logoFg || "#202621" }}
     >
       {stock.logoUrl ? <img src={stock.logoUrl} alt="" loading="lazy" /> : stock.logoText || stock.symbol.slice(0, 2)}
@@ -380,12 +381,9 @@ function TokenPicker({ open, title, items, selectedSymbol, onSelect, onClose }) 
           const active = item.symbol === selectedSymbol;
           return (
             <button className={`token-row ${active ? "active" : ""}`} type="button" role="option" aria-selected={active} key={item.address || item.symbol} onClick={() => onSelect(item)}>
-              <Logo stock={item} />
-              <span className="token-row-main">
-                <strong>{item.name}</strong>
-                <span>{item.symbol}</span>
-              </span>
               <span className={`token-change ${(item.score || 0) >= 68 ? "up" : ""}`}>{item.score ? `▲ ${(item.score / 100).toFixed(2)}%` : "0.00%"}</span>
+              <span className="token-row-symbol">{item.symbol}</span>
+              <Logo stock={item} />
             </button>
           );
         })}
@@ -617,6 +615,29 @@ function formatDateTime(value) {
   const date = new Date(value);
   if (Number.isNaN(date.getTime())) return value;
   return `${date.getDate()} ${date.toLocaleDateString("en-US", { month: "long" }).toLowerCase()} ${date.getFullYear()}`;
+}
+
+function formatJournalDate(value) {
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) return "n/a";
+  return `${date.getDate()} of ${date.toLocaleDateString("en-US", { month: "long" }).toLowerCase()} ${date.getFullYear()}`;
+}
+
+function titleCaseAction(value) {
+  const clean = String(value || "").toLowerCase();
+  if (!clean) return "Trade";
+  return clean.charAt(0).toUpperCase() + clean.slice(1);
+}
+
+function splitDisplayAmount(value) {
+  const text = String(value || "").trim();
+  if (!text) return null;
+  const parts = text.split(/\s+/);
+  if (parts.length < 2) return { amount: text, symbol: "" };
+  return {
+    amount: parts.slice(0, -1).join(" "),
+    symbol: parts.at(-1)
+  };
 }
 
 function formatKalshiVolume(value) {
@@ -1061,7 +1082,7 @@ function ConfidenceDecomposition({ stock, hermesOutput, overlay = true, onToggle
           onClick={() => setBiasOpen((open) => !open)}
           aria-expanded={biasOpen}
         >
-          {biasOpen ? "Hide bias controls" : "Adjust bias"}
+          {biasOpen ? "Hide Bias Controls" : "Adjust Bias"}
           {biasDirty && !biasOpen ? <span className="score-bias-dot" aria-hidden="true" /> : null}
         </button>
         {biasOpen ? (
@@ -1245,20 +1266,20 @@ function previewHermesOutput(intel) {
   };
 }
 
-function PostTradeJournal({ entries, stock }) {
-  const [expanded, setExpanded] = React.useState(false);
+function PostTradeJournal({ entries, stock, sectionRef, expanded, onExpandedChange }) {
   const visibleEntries = entries
     .filter((entry) => entry.status === "tx_confirmed")
     .filter((entry) => !stock || entry.symbol === stock.symbol)
     .slice(0, 6);
 
   return (
-    <section className={`hermes-module journal-view ${expanded ? "expanded" : ""}`} aria-label="Trade journal">
+    <section ref={sectionRef} className={`hermes-module journal-view ${expanded ? "expanded" : ""}`} aria-label="Trade journal">
       <div className="module-head">
-        <div>
+        <div className="menu-title-row">
+          <MotionAsset src="/media/icons/wallet-connect-orb.mp4" webmSrc="/media/icons/wallet-connect-orb.webm" className="menu-title-motion" />
           <h3>Trade Journal</h3>
         </div>
-        <button className="provenance-toggle" type="button" aria-expanded={expanded} onClick={() => setExpanded((current) => !current)}>
+        <button className="provenance-toggle" type="button" aria-expanded={expanded} onClick={() => onExpandedChange?.(!expanded)}>
           <span>{expanded ? "Collapse" : "Expand"}</span>
           {expanded ? <MinusIcon /> : <PlusIcon />}
         </button>
@@ -1266,10 +1287,13 @@ function PostTradeJournal({ entries, stock }) {
       {expanded && visibleEntries.length ? (
         <div className="journal-stack">
           {visibleEntries.map((entry) => {
-            const sideLabel = entry.side?.toUpperCase() || "TRADE";
-            const tradeTitle = entry.outputAmount
-              ? `${sideLabel} ${entry.amount || "0"} ${entry.sourceSymbol || ""} → for ${entry.outputAmount}`.trim()
-              : `${sideLabel} ${entry.amount || "0"} ${entry.sourceSymbol || ""} → ${entry.targetSymbol || ""}`.trim();
+            const output = splitDisplayAmount(entry.outputAmount);
+            const sideLabel = titleCaseAction(entry.side);
+            const outputSymbol = output?.symbol || entry.targetSymbol || "";
+            const tradeTitle = `${sideLabel} ${outputSymbol}`.trim();
+            const tradeLine = entry.outputAmount
+              ? `${entry.amount || "0"} ${entry.sourceSymbol || ""} for ${entry.outputAmount}`.trim()
+              : `${entry.amount || "0"} ${entry.sourceSymbol || ""} for ${entry.targetSymbol || ""}`.trim();
             const explorerHash = entry.hashes?.[entry.hashes.length - 1];
 
             return (
@@ -1277,10 +1301,11 @@ function PostTradeJournal({ entries, stock }) {
                 <div className="journal-entry-head">
                   <div className="journal-title-row">
                     <strong>{tradeTitle}</strong>
-                    <span>Hermes {entry.hermesAction || "n/a"} · {formatConfidence(entry.hermesConfidence)}</span>
                   </div>
-                  <time>{new Date(entry.timestamp).toLocaleString()}</time>
+                  <time>{formatJournalDate(entry.timestamp)}</time>
                 </div>
+                <p>{tradeLine}</p>
+                <small>Hermes {entry.hermesAction || "n/a"} · {formatConfidence(entry.hermesConfidence)}</small>
                 {explorerHash ? (
                   <div className="journal-links">
                     <a className="journal-explorer-button" href={`${ROBINHOOD_CHAIN_EXPLORER}/tx/${explorerHash}`} target="_blank" rel="noreferrer">
@@ -1508,6 +1533,7 @@ function App() {
   const [isLoadingMax, setIsLoadingMax] = React.useState(false);
   const [tradeConfirmation, setTradeConfirmation] = React.useState(null);
   const [journalEntries, setJournalEntries] = React.useState([]);
+  const [journalExpanded, setJournalExpanded] = React.useState(false);
   const [overlayBySymbol, setOverlayBySymbol] = React.useState({});
   const [agentMessages, setAgentMessages] = React.useState(() => [
     {
@@ -1533,6 +1559,7 @@ function App() {
   const sourceToken = side === "sell" ? stock : payToken;
   const targetToken = side === "sell" ? payToken : stock;
   const quotedOutput = quoteOutputDisplay(quote, targetToken?.symbol);
+  const journalSectionRef = React.useRef(null);
   const selectedChartData = stock ? charts[stock.symbol] || [] : [];
   const wallet = address || "";
   const connectedToRobinhood = Number(chainId) === ROBINHOOD_CHAIN_ID;
@@ -1979,6 +2006,8 @@ function App() {
         amount: output?.amount || "",
         asset: output?.asset || targetToken?.symbol || "",
         side,
+        sourceAmount: amount.trim(),
+        sourceAsset: sourceToken?.symbol || "",
         hash: finalHash,
         explorerUrl: finalHash ? `${ROBINHOOD_CHAIN_EXPLORER}/tx/${finalHash}` : ""
       });
@@ -1994,7 +2023,7 @@ function App() {
     quoteRequestRef.current = requestKey;
     setIsPreparingQuote(true);
     setTradeError("");
-    setTradeStatus("Preparing quote...");
+    setTradeStatus("Preparing Quote...");
     try {
       const res = await fetch("/api/robinhood/trade", {
         method: "POST",
@@ -2159,12 +2188,12 @@ function App() {
     if (!isReownConfigured) return "Add Reown project ID";
     if (!isConnected) return "Connect wallet";
     if (!connectedToRobinhood) return "Switch to Robinhood";
-    if (isPreparingQuote) return "Preparing quote";
+    if (isPreparingQuote) return "Preparing Quote";
     if (isLoadingMax) return "Reading balance";
     if (isExecutingQuote || walletPending) return "Waiting for wallet";
     if (quoteTransactions.length) return quoteTransactions.length === 1 ? "Swap" : `Swap ${quoteTransactions.length} txs`;
     if (!backend.trade) return "DEX unavailable";
-    if (!amount.trim()) return "Enter amount";
+    if (!amount.trim()) return "Enter Amount";
     if (tradeError) return "Retry quote";
     return "Waiting for quote";
   }
@@ -2178,6 +2207,18 @@ function App() {
   function toggleTokenPicker(kind) {
     setTokenPicker((current) => (current === kind ? null : kind));
   }
+
+  function goToJournal() {
+    setTradeConfirmation(null);
+    setJournalExpanded(true);
+    window.setTimeout(() => {
+      journalSectionRef.current?.scrollIntoView({ behavior: "smooth", block: "start" });
+    }, 0);
+  }
+
+  const tradeConfirmationAsset = tradeConfirmation
+    ? [...stocks, ...payTokens].find((item) => item.symbol === tradeConfirmation.asset)
+    : null;
 
   return (
     <>
@@ -2267,7 +2308,7 @@ function App() {
                   />
                   <div className="amount-entry readout" aria-label="Estimated output amount">
                     <strong>{quotedOutput || "-"}</strong>
-                    {isPreparingQuote || !quote?.ok ? <span>{isPreparingQuote ? "Fetching quote" : "Auto quote"}</span> : null}
+                    {isPreparingQuote ? <span>Fetching quote</span> : null}
                   </div>
                 </div>
               </div>
@@ -2382,7 +2423,13 @@ function App() {
             onMonthChange={setCalendarMonth}
             onSelectStock={openStockDetails}
           />
-          <PostTradeJournal entries={journalEntries} stock={stock} />
+          <PostTradeJournal
+            entries={journalEntries}
+            stock={stock}
+            sectionRef={journalSectionRef}
+            expanded={journalExpanded}
+            onExpandedChange={setJournalExpanded}
+          />
         </section>
 
         {stock && detailsOpen && (
@@ -2423,12 +2470,15 @@ function App() {
             <div className="trade-confirmation-head">
               <div>
                 <span>Swap confirmed</span>
-                <h3>{tradeConfirmation.side === "buy" ? "Asset bought" : "Asset received"}</h3>
+                <h3>{tradeConfirmation.side === "buy" ? "Bought" : "Received"} {tradeConfirmation.asset || "Asset"}</h3>
               </div>
               <button type="button" aria-label="Close confirmation" onClick={() => setTradeConfirmation(null)}>
                 <XIcon />
               </button>
             </div>
+            {tradeConfirmationAsset ? (
+              <Logo stock={tradeConfirmationAsset} />
+            ) : null}
             <div className="trade-confirmation-amount">
               <strong>{tradeConfirmation.amount || "-"}</strong>
               <span>{tradeConfirmation.asset || "Asset"}</span>
@@ -2438,6 +2488,9 @@ function App() {
                 View transaction {shortenAddress(tradeConfirmation.hash)}
               </a>
             ) : null}
+            <button className="trade-confirmation-link secondary" type="button" onClick={goToJournal}>
+              Go to journal
+            </button>
           </section>
         </div>
       ) : null}

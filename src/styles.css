@@ -258,8 +258,8 @@ p {
 
 .stock-section-title {
   color: var(--foreground);
-  font-size: 20px;
-  font-weight: 950;
+  font-size: 22px;
+  font-weight: 400;
   line-height: 1.05;
   text-transform: none;
 }
@@ -423,7 +423,7 @@ select {
   border-radius: 6px;
   background: transparent;
   color: #666666;
-  font-weight: 950;
+  font-weight: 500;
 }
 
 .swap-tabs button.active {
@@ -512,7 +512,7 @@ select {
   align-items: center;
   gap: 8px;
   font-size: 15px;
-  font-weight: 950;
+  font-weight: 500;
 }
 
 .swap-token-button.accent {
@@ -563,7 +563,7 @@ select {
   background: rgba(255, 255, 255, 0.74);
   color: #1f1f1f;
   font-size: 12px;
-  font-weight: 950;
+  font-weight: 500;
 }
 
 .amount-max-button:hover {
@@ -616,7 +616,7 @@ select {
   background: rgba(255, 255, 255, 0.72);
   color: #1f1f1f;
   font-size: 18px;
-  font-weight: 950;
+  font-weight: 500;
   display: inline-flex;
   align-items: center;
   justify-content: center;
@@ -719,6 +719,7 @@ select {
   background: #ccff00;
   color: #1f1f1f;
   padding: 0 14px;
+  font-weight: 600;
   text-align: center;
 }
 
@@ -802,6 +803,11 @@ select {
   box-shadow: 0 18px 60px rgba(0, 0, 0, 0.18);
 }
 
+.trade-confirmation-modal > .logo {
+  width: 44px;
+  height: 44px;
+}
+
 .trade-confirmation-head {
   display: flex;
   align-items: flex-start;
@@ -837,6 +843,11 @@ select {
 .trade-confirmation-head svg {
   width: 18px;
   height: 18px;
+  fill: none;
+  stroke: currentColor;
+  stroke-width: 2;
+  stroke-linecap: round;
+  stroke-linejoin: round;
 }
 
 .trade-confirmation-amount {
@@ -860,8 +871,12 @@ select {
   justify-content: center;
   padding: 0 14px;
   font-size: 14px;
-  font-weight: 950;
+  font-weight: 500;
   text-decoration: none;
+}
+
+.trade-confirmation-link.secondary {
+  background: #ffffff;
 }
 
 .agent-panel {
@@ -881,7 +896,8 @@ select {
 
 .agent-header h2 {
   margin: 0;
-  font-size: 20px;
+  font-size: 22px;
+  font-weight: 400;
   line-height: 1.05;
 }
 
@@ -1040,7 +1056,8 @@ select {
   color: #1f1f1f;
   padding: 7px 8px;
   display: grid;
-  grid-template-columns: minmax(0, 1fr) auto;
+  grid-template-columns: auto auto auto;
+  justify-content: end;
   gap: 9px;
   align-items: center;
   text-align: left;
@@ -1057,33 +1074,20 @@ select {
   border-radius: 0;
 }
 
-.token-row-main {
-  display: grid;
-  min-width: 0;
-}
-
-.token-row-main strong {
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-  font-size: 14px;
-  line-height: 1.15;
-}
-
-.token-row-main span {
-  color: #a5a7b0;
-  font-size: 11px;
-  font-weight: 750;
-}
-
 .token-change {
   color: #b4b6bf;
   font-size: 12px;
-  font-weight: 900;
+  font-weight: 500;
 }
 
 .token-change.up {
   color: #12d992;
+}
+
+.token-row-symbol {
+  color: #1f1f1f;
+  font-size: 14px;
+  font-weight: 500;
 }
 
 .primary {
@@ -1145,19 +1149,21 @@ select {
 .stock-top {
   width: 100%;
   display: grid;
-  grid-template-columns: auto minmax(0, 1fr);
+  grid-template-columns: auto auto;
   align-items: center;
-  justify-content: stretch;
-  justify-items: stretch;
+  justify-content: start;
+  justify-items: start;
   gap: 6px;
 }
 
 .stock-card .ticker {
-  justify-self: end;
+  justify-self: start;
+  border-left: 1px solid var(--border);
+  padding-left: 8px;
   font-size: 14px;
-  font-weight: 750;
+  font-weight: 500;
   line-height: 1;
-  text-align: right;
+  text-align: left;
 }
 
 .mini-stock-chart {
@@ -1242,7 +1248,7 @@ select {
   background: rgba(255, 255, 255, 0.74);
   color: var(--foreground);
   font-size: 11px;
-  font-weight: 800;
+  font-weight: 500;
 }
 
 .chart-range-controls button.active {
@@ -2250,7 +2256,7 @@ select {
 .provenance-row small {
   overflow: hidden;
   color: var(--muted-foreground);
-  font-size: 11px;
+  font-size: 14px;
   font-weight: 400;
   text-overflow: ellipsis;
   white-space: nowrap;
@@ -2682,8 +2688,8 @@ select {
   border-left: 3px solid var(--primary);
   background: rgba(246, 246, 242, 0.9);
   font-size: 13px;
-  font-weight: 600;
-  text-transform: uppercase;
+  font-weight: 500;
+  text-transform: none;
 }
 
 .chart-fallback {
@@ -2729,6 +2735,7 @@ select {
 
 .research-title h2 {
   font-size: 24px;
+  font-weight: 500;
   letter-spacing: 0;
 }
 
@@ -3283,7 +3290,7 @@ select {
 }
 
 .font-medium {
-  font-weight: 700;
+  font-weight: 500;
 }
 
 .font-semibold {
@@ -3710,11 +3717,11 @@ select {
   border-left: 3px solid #ccff00;
   background: rgba(246, 246, 242, 0.72);
   color: var(--foreground);
-  font-size: 11px;
-  font-weight: 900;
-  text-transform: uppercase;
-  letter-spacing: 0.02em;
-  padding: 5px 10px;
+  font-size: 13px;
+  font-weight: 500;
+  text-transform: none;
+  letter-spacing: 0;
+  padding: 7px 12px;
   cursor: pointer;
   transition: background 0.15s ease, border-color 0.15s ease;
 }
