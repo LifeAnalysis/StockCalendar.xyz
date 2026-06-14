@@ -1,0 +1,371 @@
+.research-panel {
+  display: grid;
+  gap: 14px;
+}
+
+.research-heading {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  border: 1px solid var(--border);
+  background: rgba(255, 255, 255, 0.72);
+  padding: 8px 10px;
+}
+
+.research-title {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+}
+
+.research-title .logo {
+  width: 38px;
+  height: 38px;
+}
+
+.research-title h2 {
+  font-size: 24px;
+  font-weight: 500;
+  letter-spacing: 0;
+}
+
+.detail-stack {
+  display: grid;
+  gap: 12px;
+}
+
+.cn-card {
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  background: var(--card);
+  color: var(--card-foreground);
+  box-shadow: none;
+}
+
+.cn-card-header,
+.cn-card-content {
+  padding: 14px;
+}
+
+.cn-card-content {
+  min-width: 0;
+}
+
+.earnings-calendar {
+  position: relative;
+  overflow-x: hidden;
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  background: rgba(255, 255, 255, 0.92);
+  color: var(--card-foreground);
+  box-shadow: none;
+}
+
+.earnings-calendar-toolbar {
+  min-width: 0;
+  min-height: 56px;
+  display: grid;
+  grid-template-columns: minmax(0, 1fr);
+  align-items: center;
+  gap: 8px;
+  padding: 10px 14px;
+}
+
+.earnings-calendar.expanded .earnings-calendar-toolbar {
+  grid-template-columns: minmax(0, 1fr) auto auto;
+}
+
+.earnings-calendar-toolbar button,
+.calendar-view-chip {
+  min-height: 34px;
+  display: inline-grid;
+  place-items: center;
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  background: var(--paper-strong);
+  color: var(--foreground);
+  font-weight: 850;
+  padding: 0 12px;
+}
+
+.calendar-toggle {
+  justify-self: stretch;
+  width: 100%;
+  display: grid !important;
+  grid-template-columns: minmax(0, 1fr) auto;
+  align-items: center;
+  justify-items: stretch;
+  justify-content: start;
+  gap: 10px;
+  border: 0 !important;
+  background: transparent !important;
+  padding: 0 !important;
+  text-align: left;
+}
+
+.calendar-toggle .menu-title-row {
+  justify-self: start;
+}
+
+.calendar-toggle .expand-action {
+  justify-self: end;
+}
+
+.calendar-toggle .menu-title-text {
+  color: var(--foreground);
+  font-size: 22px;
+  font-weight: 400;
+  line-height: 1;
+}
+
+.calendar-toggle svg {
+  width: 18px;
+  height: 18px;
+  stroke: var(--foreground);
+  stroke-width: 2;
+}
+
+.earnings-calendar.expanded .earnings-calendar-toolbar {
+  border-bottom: 1px solid var(--border);
+}
+
+.calendar-icon-button {
+  width: 34px;
+  padding: 0;
+  color: #ccff00;
+}
+
+.calendar-icon-button svg {
+  width: 18px;
+  height: 18px;
+  stroke: currentColor;
+  stroke-width: 2.8;
+  fill: none;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+}
+
+.earnings-calendar-toolbar h3 {
+  margin: 0;
+  overflow: hidden;
+  color: var(--foreground);
+  font-size: 24px;
+  font-weight: 400;
+  line-height: 1;
+  letter-spacing: 0;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.calendar-view-chip {
+  color: var(--muted-foreground);
+}
+
+.earnings-calendar-weekdays,
+.earnings-calendar-grid {
+  min-width: 0;
+}
+
+.earnings-calendar-weekdays {
+  display: grid;
+  grid-template-columns: repeat(7, minmax(0, 1fr));
+  border-bottom: 1px solid var(--border);
+}
+
+.earnings-calendar-weekdays span {
+  padding: 7px 4px;
+  color: var(--muted-foreground);
+  font-size: 11px;
+  font-weight: 850;
+  text-align: center;
+}
+
+.earnings-calendar-grid {
+  display: grid;
+  grid-template-columns: repeat(7, minmax(0, 1fr));
+}
+
+.earnings-day {
+  min-height: 72px;
+  display: grid;
+  align-content: start;
+  gap: 4px;
+  padding: 6px;
+  border-right: 1px solid var(--border);
+  border-bottom: 1px solid var(--border);
+  background: rgba(255, 255, 255, 0.74);
+}
+
+.earnings-day:nth-child(7n) {
+  border-right: 0;
+}
+
+.earnings-day.outside {
+  background: rgba(255, 255, 255, 0.46);
+  color: var(--muted-foreground);
+}
+
+.earnings-day-number {
+  width: max-content;
+  min-width: 20px;
+  height: 20px;
+  display: grid;
+  place-items: center;
+  color: inherit;
+  font-size: 12px;
+  font-weight: 850;
+}
+
+.earnings-day.today .earnings-day-number {
+  border-radius: var(--radius);
+  background: #ccff00;
+  color: #1f1f1f;
+}
+
+.earnings-day-events {
+  display: grid;
+  gap: 3px;
+}
+
+.earnings-event {
+  width: 100%;
+  min-width: 0;
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr);
+  grid-template-rows: auto;
+  align-items: center;
+  column-gap: 4px;
+  padding: 3px 4px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  background: #ffffff;
+  color: var(--foreground);
+  font-size: 12px;
+  font-weight: 900;
+  text-align: left;
+}
+
+.earnings-event .logo {
+  width: 20px;
+  height: 20px;
+  grid-row: auto;
+  border-radius: var(--radius);
+}
+
+.earnings-event span,
+.earnings-event small {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.earnings-event small {
+  color: var(--muted-foreground);
+  font-size: 10px;
+  font-weight: 850;
+  line-height: 1;
+  text-transform: uppercase;
+}
+
+.earnings-event.amzn,
+.earnings-event.tsla,
+.earnings-event.nflx,
+.earnings-event.amd,
+.earnings-event.pltr {
+  background: #ffffff;
+  color: var(--foreground);
+}
+
+.earnings-event.amzn small,
+.earnings-event.tsla small,
+.earnings-event.nflx small,
+.earnings-event.amd small,
+.earnings-event.pltr small {
+  color: var(--muted-foreground);
+}
+
+.earnings-detail-layer {
+  position: absolute;
+  z-index: 6;
+  inset: 58px 0 0;
+  border-top: 1px solid var(--border);
+  background: rgba(255, 255, 255, 0.96);
+  color: var(--foreground);
+  display: grid;
+  grid-template-rows: auto auto minmax(0, 1fr);
+}
+
+.earnings-detail-head {
+  min-height: 58px;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 12px 14px;
+  border-bottom: 1px solid var(--border);
+}
+
+.earnings-detail-head > div {
+  display: grid;
+  gap: 3px;
+}
+
+.earnings-detail-head span {
+  color: var(--muted-foreground);
+  font-size: 11px;
+  font-weight: 950;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+}
+
+.earnings-detail-head strong {
+  font-size: 24px;
+  line-height: 1;
+}
+
+.earnings-detail-close {
+  width: 34px;
+  height: 34px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  background: #ffffff;
+  color: var(--foreground);
+  font-size: 20px;
+  font-weight: 950;
+}
+
+.earnings-detail-table-wrap {
+  overflow: auto;
+  padding: 14px;
+}
+
+.earnings-detail-table {
+  width: 100%;
+  min-width: 560px;
+  border-collapse: collapse;
+  background: #ffffff;
+  font-size: 13px;
+}
+
+.earnings-detail-table th,
+.earnings-detail-table td {
+  border: 1px solid var(--border);
+  padding: 10px 12px;
+  text-align: left;
+  vertical-align: top;
+}
+
+.earnings-detail-table th {
+  width: 132px;
+  color: var(--muted-foreground);
+  font-size: 11px;
+  font-weight: 950;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+}
+
+.earnings-detail-table td {
+  font-weight: 850;
+  overflow-wrap: anywhere;
+}

@@ -1,0 +1,44 @@
+.items-center {
+  align-items: center;
+}
+
+.items-end {
+  align-items: flex-end;
+}
+
+.relative {
+  position: relative;
+}
+
+.w-full {
+  width: 100%;
+}
+
+.h-full {
+  height: 100%;
+}
+
+.text-3xl {
+  font-size: 30px;
+}
+
+.font-medium {
+  font-weight: 500;
+}
+
+.font-semibold {
+  font-weight: 850;
+}
+
+.text-muted-foreground {
+  color: var(--muted-foreground);
+}
+
+[data-orientation="horizontal"] {
+  height: 1px;
+  width: 100%;
+}
+
+.recharts-surface {
+  overflow: hidden;
+}

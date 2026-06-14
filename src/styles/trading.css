@@ -1,0 +1,844 @@
+.swap-shell {
+  display: grid;
+  gap: 6px;
+}
+
+.swap-toolbar {
+  display: block;
+  padding: 2px;
+}
+
+.swap-tabs {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  width: 100%;
+  min-height: 32px;
+  border: 1px solid #d8d8d8;
+  border-radius: var(--radius);
+  background: #ffffff;
+  padding: 4px;
+}
+
+.swap-tabs button {
+  border: 0;
+  border-radius: 6px;
+  background: transparent;
+  color: #666666;
+  font-weight: 500;
+}
+
+.swap-tabs button.active {
+  background: #f1f1f1;
+  color: #1f1f1f;
+}
+
+.swap-tabs button.active.sell {
+  background: #f1f1f1;
+  color: #1f1f1f;
+}
+
+.icon-button {
+  min-width: 40px;
+  height: 40px;
+  border: 0;
+  border-radius: var(--radius);
+  background: #ffffff;
+  color: #1f1f1f;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 7px;
+  font-size: 20px;
+  font-weight: 950;
+}
+
+.icon-button svg,
+.swap-token-button svg,
+.swap-flip svg {
+  width: 20px;
+  height: 20px;
+  fill: none;
+  stroke: currentColor;
+  stroke-width: 2.3;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+}
+
+.swap-token-button svg {
+  width: 17px;
+  height: 17px;
+}
+
+.swap-card {
+  position: relative;
+  display: grid;
+  gap: 4px;
+}
+
+.swap-leg {
+  min-height: 92px;
+  border: 1px solid #d8d8d8;
+  border-radius: var(--radius);
+  background: rgba(255, 255, 255, 0.68);
+  padding: 12px 14px;
+  display: grid;
+  grid-template-columns: minmax(118px, auto) minmax(0, 1fr);
+  gap: 10px;
+  align-items: center;
+}
+
+.swap-leg.output {
+  padding-top: 12px;
+}
+
+.swap-leg-label {
+  grid-column: 1 / -1;
+  color: #777777;
+  font-size: 12px;
+  font-weight: 950;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+}
+
+.swap-token-button {
+  justify-self: start;
+  min-height: 38px;
+  max-width: 100%;
+  border: 0;
+  border-radius: var(--radius);
+  background: #f4f4f4;
+  color: #1f1f1f;
+  padding: 0 10px;
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 15px;
+  font-weight: 500;
+}
+
+.swap-token-button.accent {
+  background: #f4f4f4;
+  color: #1f1f1f;
+}
+
+.swap-token-button .logo {
+  width: 26px;
+  height: 26px;
+  border-radius: 0;
+}
+
+.amount-entry {
+  min-width: 0;
+  display: grid;
+  justify-items: end;
+  gap: 3px;
+}
+
+.amount-input-row {
+  width: 100%;
+  min-width: 0;
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 8px;
+}
+
+.amount-entry input {
+  width: 100%;
+  min-height: 36px;
+  border: 0;
+  background: transparent;
+  color: #1f1f1f;
+  padding: 0;
+  text-align: right;
+  font-size: 30px;
+  font-weight: 950;
+  line-height: 1;
+}
+
+.amount-max-button {
+  min-width: 44px;
+  min-height: 28px;
+  border: 1px solid #d8d8d8;
+  border-radius: var(--radius);
+  background: rgba(255, 255, 255, 0.74);
+  color: #1f1f1f;
+  font-size: 12px;
+  font-weight: 500;
+}
+
+.amount-max-button:hover {
+  background: #f4f4f4;
+}
+
+.amount-max-button:disabled {
+  cursor: not-allowed;
+  opacity: 0.55;
+}
+
+.amount-entry input::placeholder {
+  color: #777777;
+  opacity: 1;
+}
+
+.amount-entry span {
+  color: #777777;
+  font-size: 13px;
+  font-weight: 700;
+}
+
+.asset-balance-line {
+  width: 100%;
+  min-height: 16px;
+  display: flex;
+  justify-content: flex-end;
+  gap: 5px;
+  color: #777777;
+  font-size: 11px;
+  font-weight: 750;
+  line-height: 1.2;
+  text-align: right;
+}
+
+.asset-balance-line span {
+  font-size: inherit;
+  font-weight: 750;
+}
+
+.asset-balance-line strong {
+  color: #1f1f1f;
+  font-weight: 850;
+}
+
+.asset-balance-line.error strong {
+  color: var(--red);
+}
+
+.amount-entry.readout strong {
+  color: #777777;
+  font-size: 30px;
+  line-height: 1;
+}
+
+.swap-flip {
+  position: absolute;
+  z-index: 2;
+  left: 50%;
+  top: 50%;
+  width: 34px;
+  height: 34px;
+  border: 1px solid #d8d8d8;
+  border-radius: 50%;
+  background: #ffffff;
+  color: #777777;
+  display: grid;
+  place-items: center;
+  transform: translate(-50%, -50%);
+}
+
+.swap-submit {
+  min-height: 48px;
+  border: 0;
+  border-radius: var(--radius);
+  border: 1px solid #d8d8d8;
+  background: rgba(255, 255, 255, 0.72);
+  color: #1f1f1f;
+  font-size: 18px;
+  font-weight: 500;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 10px;
+  overflow: hidden;
+}
+
+.swap-submit:hover {
+  background: #f4f4f4;
+}
+
+.swap-submit:disabled {
+  cursor: not-allowed;
+  opacity: 0.55;
+}
+
+.submit-motion {
+  width: 30px;
+  height: 30px;
+  flex: 0 0 30px;
+  border-radius: 50%;
+  object-fit: cover;
+  mix-blend-mode: multiply;
+}
+
+.wallet-route-stack {
+  display: grid;
+  gap: 6px;
+}
+
+.wallet-row {
+  min-height: 48px;
+  border: 1px solid #d8d8d8;
+  border-radius: var(--radius);
+  background: rgba(255, 255, 255, 0.68);
+  display: grid;
+  align-items: center;
+}
+
+.wallet-row {
+  grid-template-columns: minmax(0, 1fr);
+  gap: 10px;
+  padding: 8px 12px;
+}
+
+.wallet-row span {
+  color: #777777;
+  font-size: 11px;
+  font-weight: 950;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+}
+
+.wallet-row input {
+  min-height: 32px;
+  border: 0;
+  background: transparent;
+  color: #1f1f1f;
+  padding: 0;
+  text-align: right;
+  font-size: 15px;
+  font-weight: 850;
+}
+
+.wallet-actions {
+  min-width: 0;
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 8px;
+}
+
+.wallet-connect-row .wallet-actions {
+  width: 100%;
+  justify-content: space-between;
+}
+
+.wallet-address-button,
+.wallet-link-button,
+.network-row button {
+  min-height: 32px;
+  border: 0;
+  border-radius: var(--radius);
+  background: transparent;
+  color: #1f1f1f;
+  padding: 0;
+  font-size: 15px;
+  font-weight: 900;
+}
+
+.wallet-address-button {
+  text-align: left;
+}
+
+.connect-wallet-button {
+  justify-self: stretch;
+  width: 100%;
+  min-width: 0;
+  border: 1px solid #b4e600;
+  background: #ccff00;
+  color: #1f1f1f;
+  padding: 0 14px;
+  font-weight: 600;
+  text-align: center;
+}
+
+.connect-wallet-button:hover {
+  background: #d8ff33;
+}
+
+.wallet-link-button,
+.network-row button {
+  color: #777777;
+  font-size: 12px;
+}
+
+.network-row,
+.quote-status {
+  min-height: 38px;
+  border: 1px solid #d8d8d8;
+  border-radius: var(--radius);
+  background: rgba(255, 255, 255, 0.58);
+  color: #777777;
+  padding: 8px 12px;
+  font-size: 12px;
+  font-weight: 850;
+}
+
+.network-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+}
+
+.network-row.ready span {
+  color: var(--green);
+}
+
+.quote-status {
+  display: grid;
+  gap: 7px;
+  line-height: 1.35;
+}
+
+.quote-status.error {
+  color: var(--red);
+}
+
+.tx-links {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+
+.tx-links a {
+  border: 1px solid #d8d8d8;
+  background: #ffffff;
+  color: #1f1f1f;
+  padding: 4px 6px;
+  font-size: 11px;
+  font-weight: 900;
+}
+
+.trade-confirmation-backdrop {
+  position: fixed;
+  inset: 0;
+  z-index: 80;
+  display: grid;
+  place-items: center;
+  padding: 20px;
+  background: rgba(0, 0, 0, 0.36);
+}
+
+.trade-confirmation-modal {
+  width: min(420px, 100%);
+  border: 1px solid #d8d8d8;
+  border-radius: var(--radius);
+  background: rgba(255, 255, 255, 0.96);
+  color: #1f1f1f;
+  padding: 18px;
+  display: grid;
+  gap: 18px;
+  box-shadow: 0 18px 60px rgba(0, 0, 0, 0.18);
+}
+
+.trade-confirmation-modal > .logo {
+  width: 44px;
+  height: 44px;
+}
+
+.trade-confirmation-head {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 16px;
+}
+
+.trade-confirmation-head span,
+.trade-confirmation-amount span {
+  color: #777777;
+  font-size: 13px;
+  font-weight: 850;
+}
+
+.trade-confirmation-head h3 {
+  margin: 4px 0 0;
+  font-size: 24px;
+  line-height: 1;
+}
+
+.trade-confirmation-head button {
+  width: 34px;
+  height: 34px;
+  border: 1px solid #d8d8d8;
+  border-radius: var(--radius);
+  background: #ffffff;
+  color: #1f1f1f;
+  display: grid;
+  place-items: center;
+  flex: 0 0 34px;
+}
+
+.trade-confirmation-head svg {
+  width: 18px;
+  height: 18px;
+  fill: none;
+  stroke: currentColor;
+  stroke-width: 2;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+}
+
+.trade-confirmation-amount {
+  display: grid;
+  gap: 6px;
+}
+
+.trade-confirmation-amount strong {
+  font-size: 34px;
+  line-height: 1;
+}
+
+.trade-confirmation-link {
+  min-height: 42px;
+  border: 1px solid #d8d8d8;
+  border-radius: var(--radius);
+  background: #ccff00;
+  color: #1f1f1f;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  padding: 0 14px;
+  font-size: 14px;
+  font-weight: 500;
+  text-decoration: none;
+}
+
+.trade-confirmation-link.secondary {
+  background: #ffffff;
+}
+
+.token-picker-panel {
+  width: 100%;
+  max-height: 210px;
+  border: 1px solid #d8d8d8;
+  border-radius: var(--radius);
+  background: #ffffff;
+  color: #1f1f1f;
+  overflow: hidden;
+  display: grid;
+  grid-template-rows: minmax(0, 1fr);
+}
+
+.token-list {
+  overflow-y: auto;
+  padding: 4px;
+}
+
+.token-row {
+  width: 100%;
+  min-height: 50px;
+  border: 0;
+  border-radius: var(--radius);
+  background: transparent;
+  color: #1f1f1f;
+  padding: 7px 8px;
+  display: grid;
+  grid-template-columns: auto auto auto;
+  justify-content: end;
+  gap: 9px;
+  align-items: center;
+  text-align: left;
+}
+
+.token-row:hover,
+.token-row.active {
+  background: #f4f4f4;
+}
+
+.token-row .logo {
+  width: 30px;
+  height: 30px;
+  border-radius: 0;
+}
+
+.token-change {
+  color: #b4b6bf;
+  font-size: 12px;
+  font-weight: 500;
+}
+
+.token-change.up {
+  color: #12d992;
+}
+
+.token-row-symbol {
+  color: #1f1f1f;
+  font-size: 14px;
+  font-weight: 500;
+}
+
+.primary {
+  border-color: var(--foreground);
+  background: var(--foreground);
+  color: #fff;
+}
+
+.stocks-grid {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 8px;
+}
+
+.stock-card {
+  min-height: 40px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  background: #ffffff;
+  padding: 3px 6px;
+  display: grid;
+  grid-template-columns: minmax(0, 1fr);
+  gap: 8px;
+  align-items: center;
+  text-align: left;
+  transition: transform 0.16s ease, border-color 0.16s ease, box-shadow 0.16s ease;
+}
+
+.stock-select {
+  border: 0;
+  background: transparent;
+  color: inherit;
+  padding: 0;
+  text-align: left;
+  min-width: 0;
+  width: 100%;
+  display: grid;
+  grid-template-columns: minmax(0, 1fr);
+  align-items: center;
+  justify-items: stretch;
+  gap: 4px;
+}
+
+.stock-card:hover,
+.stock-card.active {
+  transform: translateY(-1px);
+  border-color: var(--primary);
+  box-shadow: none;
+}
+
+.stock-card .logo {
+  width: 28px;
+  height: 28px;
+  border: 0;
+  border-radius: 0;
+  padding: 1px;
+}
+
+.stock-top {
+  width: 100%;
+  display: grid;
+  grid-template-columns: auto auto;
+  align-items: center;
+  justify-content: start;
+  justify-items: start;
+  gap: 6px;
+}
+
+.stock-card .ticker {
+  justify-self: start;
+  border-left: 1px solid var(--border);
+  padding-left: 8px;
+  font-size: 14px;
+  font-weight: 500;
+  line-height: 1;
+  text-align: left;
+}
+
+.mini-stock-chart {
+  display: none;
+}
+
+.mini-stock-chart polyline,
+.mini-stock-chart line {
+  fill: none;
+  stroke: currentColor;
+  stroke-width: 2;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+}
+
+.ticker {
+  justify-self: start;
+  font-size: 12px;
+  font-weight: 400;
+  line-height: 1;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.company {
+  margin-top: 3px;
+  color: var(--muted-foreground);
+  font-size: 12px;
+}
+
+.stock-chart-card {
+  width: 100%;
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  background: var(--paper-strong);
+  color: var(--foreground);
+  overflow: hidden;
+}
+
+.stock-chart-card-header {
+  border-bottom: 1px solid var(--border);
+  padding: 20px 24px;
+}
+
+.stock-chart-card-title {
+  font-size: 22px;
+  font-weight: 950;
+  line-height: 1;
+}
+
+.stock-chart-card-description {
+  margin-top: 6px;
+  color: var(--muted-foreground);
+  font-size: 13px;
+  font-weight: 800;
+}
+
+.stock-chart-card-content {
+  padding: 10px;
+  overflow: hidden;
+}
+
+.chart-shell {
+  display: grid;
+  gap: 0;
+}
+
+.chart-range-controls {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+  gap: 6px;
+  padding: 2px;
+}
+
+.chart-range-controls button {
+  min-width: 42px;
+  min-height: 28px;
+  border: 1px solid var(--border);
+  border-radius: 0;
+  background: rgba(255, 255, 255, 0.74);
+  color: var(--foreground);
+  font-size: 11px;
+  font-weight: 500;
+}
+
+.chart-range-controls button.active {
+  border-color: #a9dc00;
+  background: #ccff00;
+}
+
+.stock-chart-card-footer {
+  display: grid;
+  gap: 7px;
+  border-top: 1px solid var(--border);
+  padding: 14px 24px 18px;
+  color: var(--muted-foreground);
+  font-size: 13px;
+}
+
+.interactive-chart-frame,
+.interactive-chart-container {
+  width: 100%;
+  height: 230px;
+  overflow: hidden;
+}
+
+.stock-chart-container {
+  display: flex;
+  width: 100%;
+  justify-content: center;
+  font-size: 12px;
+}
+
+.stock-chart-container .recharts-cartesian-grid line {
+  stroke: color-mix(in oklab, var(--border) 72%, transparent);
+}
+
+.stock-chart-container .recharts-cartesian-axis-tick text {
+  fill: var(--muted-foreground);
+  font-size: 12px;
+  font-weight: 750;
+}
+
+.stock-chart-tooltip {
+  min-width: 128px;
+  display: grid;
+  gap: 7px;
+  border: 1px solid color-mix(in oklab, var(--border) 70%, transparent);
+  border-radius: var(--radius);
+  background: var(--paper-strong);
+  padding: 8px 10px;
+  color: var(--foreground);
+  box-shadow: var(--shadow);
+  font-size: 12px;
+}
+
+.tooltip-label {
+  font-weight: 900;
+}
+
+.tooltip-list {
+  display: grid;
+  gap: 6px;
+}
+
+.tooltip-item,
+.tooltip-item-body,
+.stock-chart-legend,
+.stock-chart-legend-item {
+  display: flex;
+  align-items: center;
+}
+
+.tooltip-item {
+  gap: 8px;
+}
+
+.tooltip-indicator {
+  width: 10px;
+  height: 10px;
+  flex: 0 0 auto;
+  border: 1px solid var(--color-border);
+  border-radius: 2px;
+  background: var(--color-bg);
+}
+
+.tooltip-indicator.line {
+  width: 4px;
+  height: 16px;
+}
+
+.tooltip-indicator.dashed {
+  width: 0;
+  height: 16px;
+  border-width: 1.5px;
+  border-style: dashed;
+  background: transparent;
+}
+
+.tooltip-item-body {
+  flex: 1;
+  justify-content: space-between;
+  gap: 14px;
+  line-height: 1;
+}
+
+.tooltip-item-label {
+  display: grid;
+  gap: 3px;
+  color: var(--muted-foreground);
+}
+
+.tooltip-value {
+  font: 850 12px/1 ui-monospace, SFMono-Regular, Menlo, monospace;
+}
+
+.chart-tooltip-width {
+  width: 150px;
+}
