@@ -443,6 +443,46 @@ function MiniStockChart({ data }) {
   );
 }
 
+const SCORE_RADIAL_SEGMENTS = Array.from({ length: 25 }, (_, index) => index);
+
+function scoreRadialColor(index) {
+  if (index < 5) return "var(--primary)";
+  const mix = Math.max(5, 100 - Math.floor((index - 3) / 2) * 10);
+  return `color-mix(in oklab, var(--primary) ${mix}%, var(--background))`;
+}
+
+function ScoreRadial({ value }) {
+  const radius = 72;
+  const circumference = 2 * Math.PI * radius;
+  const segmentLength = circumference / SCORE_RADIAL_SEGMENTS.length - 3;
+
+  return (
+    <svg role="img" className="recharts-surface" width="282" height="180" viewBox="0 0 282 180">
+      <title>Hermes confidence {value}%</title>
+      <g className="recharts-layer recharts-pie" transform="translate(141 100)">
+        {SCORE_RADIAL_SEGMENTS.map((index) => (
+          <circle
+            key={index}
+            className="recharts-sector"
+            cx="0"
+            cy="0"
+            r={radius}
+            fill="none"
+            stroke={scoreRadialColor(index)}
+            strokeWidth="25"
+            strokeDasharray={`${segmentLength} ${circumference - segmentLength}`}
+            strokeDashoffset={-(index * circumference) / SCORE_RADIAL_SEGMENTS.length}
+            transform="rotate(-88)"
+          />
+        ))}
+        <text textAnchor="middle" dominantBaseline="middle">
+          <tspan x="0" y="4" className="score-radial-value">{value}%</tspan>
+        </text>
+      </g>
+    </svg>
+  );
+}
+
 async function readJsonResponse(response) {
   const contentType = response.headers.get("content-type") || "";
   if (!response.ok || !contentType.includes("application/json")) return null;
@@ -493,60 +533,7 @@ function HermesOutputBar({ stock, hermesOutput, loading, progress, overlay = tru
         <div className="score-head">
           <div className={`score-left${overlay ? "" : " score-left-overlay-off"}`}>
             <div className="score-radial" aria-label={`Hermes confidence ${displayScore}%`}>
-            <svg cx="50%" cy="50%" role="application" tabIndex="0" className="recharts-surface" width="282" height="180" viewBox="0 0 282 180" style={{ width: "100%", height: "100%", display: "block" }}>
-              <title></title>
-              <desc></desc>
-              <g tabIndex="-1" className="recharts-zIndex-layer_-100"></g>
-              <g tabIndex="-1" className="recharts-zIndex-layer_-50"></g>
-              <defs>
-                <clipPath id="hermes-score-clip">
-                  <rect x="0" y="0" height="200" width="282"></rect>
-                </clipPath>
-              </defs>
-              <g tabIndex="-1" className="recharts-zIndex-layer_100">
-                <g className="recharts-layer recharts-pie" tabIndex="0">
-                  <g className="recharts-layer">
-                    <g className="recharts-layer recharts-pie-sector" tabIndex="-1"><g className="recharts-layer recharts-shape"><path cx="141" cy="100" fill="var(--primary)" stroke="#fff" name="2023-11-30" tabIndex="-1" data-recharts-item-index="0" data-recharts-item-id="recharts-pie-_r_2_" className="recharts-sector" d="M 226,100 A 85,85,0,0,0,225.7929,94.0707 L 200.8538,95.8146 A 60,60,0,0,1,201,100 Z"></path></g></g>
-                    <g className="recharts-layer recharts-pie-sector" tabIndex="-1"><g className="recharts-layer recharts-shape"><path cx="141" cy="100" fill="var(--primary)" stroke="#fff" name="2023-12-12" tabIndex="-1" data-recharts-item-index="1" data-recharts-item-id="recharts-pie-_r_2_" className="recharts-sector" d="M 224.9535,86.7031 A 85,85,0,0,0,223.8215,80.8792 L 199.4622,86.5029 A 60,60,0,0,1,200.2613,90.6139 Z"></path></g></g>
-                    <g className="recharts-layer recharts-pie-sector" tabIndex="-1"><g className="recharts-layer recharts-shape"><path cx="141" cy="100" fill="var(--primary)" stroke="#fff" name="2023-11-20" tabIndex="-1" data-recharts-item-index="2" data-recharts-item-id="recharts-pie-_r_2_" className="recharts-sector" d="M 221.8398,73.7336 A 85,85,0,0,0,219.8106,68.1584 L 196.631,77.5236 A 60,60,0,0,1,198.0634,81.459 Z"></path></g></g>
-                    <g className="recharts-layer recharts-pie-sector" tabIndex="-1"><g className="recharts-layer recharts-shape"><path cx="141" cy="100" fill="var(--primary)" stroke="#fff" name="2023-12-12" tabIndex="-1" data-recharts-item-index="3" data-recharts-item-id="recharts-pie-_r_2_" className="recharts-sector" d="M 216.7356,61.4108 A 85,85,0,0,0,213.8592,56.2218 L 192.43,69.0977 A 60,60,0,0,1,194.4604,72.7606 Z"></path></g></g>
-                    <g className="recharts-layer recharts-pie-sector" tabIndex="-1"><g className="recharts-layer recharts-shape"><path cx="141" cy="100" fill="var(--primary)" stroke="#fff" name="2023-12-12" tabIndex="-1" data-recharts-item-index="4" data-recharts-item-id="recharts-pie-_r_2_" className="recharts-sector" d="M 209.7664,50.0383 A 85,85,0,0,0,206.1138,45.3631 L 186.9627,61.4327 A 60,60,0,0,1,189.541,64.7329 Z"></path></g></g>
-                    <g className="recharts-layer recharts-pie-sector" tabIndex="-1"><g className="recharts-layer recharts-shape"><path cx="141" cy="100" fill="color-mix(in oklab, var(--primary) 90%, var(--background))" stroke="#fff" name="2023-12-12" tabIndex="-1" data-recharts-item-index="5" data-recharts-item-id="recharts-pie-_r_2_" className="recharts-sector" d="M 201.1041,39.8959 A 85,85,0,0,0,196.765,35.8497 L 180.3635,54.7174 A 60,60,0,0,1,183.4264,57.5736 Z"></path></g></g>
-                    <g className="recharts-layer recharts-pie-sector" tabIndex="-1"><g className="recharts-layer recharts-shape"><path cx="141" cy="100" fill="color-mix(in oklab, var(--primary) 90%, var(--background))" stroke="#fff" name="2023-12-12" tabIndex="-1" data-recharts-item-index="6" data-recharts-item-id="recharts-pie-_r_2_" className="recharts-sector" d="M 190.9617,31.2336 A 85,85,0,0,0,186.0431,27.9159 L 172.7952,49.1171 A 60,60,0,0,1,176.2671,51.459 Z"></path></g></g>
-                    <g className="recharts-layer recharts-pie-sector" tabIndex="-1"><g className="recharts-layer recharts-shape"><path cx="141" cy="100" fill="color-mix(in oklab, var(--primary) 80%, var(--background))" stroke="#fff" name="2023-12-12" tabIndex="-1" data-recharts-item-index="7" data-recharts-item-id="recharts-pie-_r_2_" className="recharts-sector" d="M 179.5892,24.2644 A 85,85,0,0,0,174.2121,21.7571 L 164.4439,44.7697 A 60,60,0,0,1,168.2394,46.5396 Z"></path></g></g>
-                    <g className="recharts-layer recharts-pie-sector" tabIndex="-1"><g className="recharts-layer recharts-shape"><path cx="141" cy="100" fill="color-mix(in oklab, var(--primary) 80%, var(--background))" stroke="#fff" name="2023-12-12" tabIndex="-1" data-recharts-item-index="8" data-recharts-item-id="recharts-pie-_r_2_" className="recharts-sector" d="M 167.2664,19.1602 A 85,85,0,0,0,161.5634,17.5249 L 155.5153,41.7823 A 60,60,0,0,1,159.541,42.9366 Z"></path></g></g>
-                    <g className="recharts-layer recharts-pie-sector" tabIndex="-1"><g className="recharts-layer recharts-shape"><path cx="141" cy="100" fill="color-mix(in oklab, var(--primary) 70%, var(--background))" stroke="#fff" name="2023-12-12" tabIndex="-1" data-recharts-item-index="9" data-recharts-item-id="recharts-pie-_r_2_" className="recharts-sector" d="M 154.2969,16.0465 A 85,85,0,0,0,148.4082,15.3235 L 146.2293,40.2283 A 60,60,0,0,1,150.3861,40.7387 Z"></path></g></g>
-                    <g className="recharts-layer recharts-pie-sector" tabIndex="-1"><g className="recharts-layer recharts-shape"><path cx="141" cy="100" fill="color-mix(in oklab, var(--primary) 70%, var(--background))" stroke="#fff" name="2023-12-12" tabIndex="-1" data-recharts-item-index="10" data-recharts-item-id="recharts-pie-_r_2_" className="recharts-sector" d="M 141,15 A 85,85,0,0,0,135.0707,15.2071 L 136.8146,40.1462 A 60,60,0,0,1,141,40 Z"></path></g></g>
-                    <g className="recharts-layer recharts-pie-sector" tabIndex="-1"><g className="recharts-layer recharts-shape"><path cx="141" cy="100" fill="color-mix(in oklab, var(--primary) 60%, var(--background))" stroke="#fff" name="2023-12-12" tabIndex="-1" data-recharts-item-index="11" data-recharts-item-id="recharts-pie-_r_2_" className="recharts-sector" d="M 127.7031,16.0465 A 85,85,0,0,0,121.8792,17.1785 L 127.5029,41.5378 A 60,60,0,0,1,131.6139,40.7387 Z"></path></g></g>
-                    <g className="recharts-layer recharts-pie-sector" tabIndex="-1"><g className="recharts-layer recharts-shape"><path cx="141" cy="100" fill="color-mix(in oklab, var(--primary) 60%, var(--background))" stroke="#fff" name="2023-12-12" tabIndex="-1" data-recharts-item-index="12" data-recharts-item-id="recharts-pie-_r_2_" className="recharts-sector" d="M 114.7336,19.1602 A 85,85,0,0,0,109.1584,21.1894 L 118.5236,44.369 A 60,60,0,0,1,122.459,42.9366 Z"></path></g></g>
-                    <g className="recharts-layer recharts-pie-sector" tabIndex="-1"><g className="recharts-layer recharts-shape"><path cx="141" cy="100" fill="color-mix(in oklab, var(--primary) 50%, var(--background))" stroke="#fff" name="2023-12-12" tabIndex="-1" data-recharts-item-index="13" data-recharts-item-id="recharts-pie-_r_2_" className="recharts-sector" d="M 102.4108,24.2644 A 85,85,0,0,0,97.2218,27.1408 L 110.0977,48.57 A 60,60,0,0,1,113.7606,46.5396 Z"></path></g></g>
-                    <g className="recharts-layer recharts-pie-sector" tabIndex="-1"><g className="recharts-layer recharts-shape"><path cx="141" cy="100" fill="color-mix(in oklab, var(--primary) 50%, var(--background))" stroke="#fff" name="2023-12-12" tabIndex="-1" data-recharts-item-index="14" data-recharts-item-id="recharts-pie-_r_2_" className="recharts-sector" d="M 91.0383,31.2336 A 85,85,0,0,0,86.3631,34.8862 L 102.4327,54.0373 A 60,60,0,0,1,105.7329,51.459 Z"></path></g></g>
-                    <g className="recharts-layer recharts-pie-sector" tabIndex="-1"><g className="recharts-layer recharts-shape"><path cx="141" cy="100" fill="color-mix(in oklab, var(--primary) 40%, var(--background))" stroke="#fff" name="2023-12-12" tabIndex="-1" data-recharts-item-index="15" data-recharts-item-id="recharts-pie-_r_2_" className="recharts-sector" d="M 80.8959,39.8959 A 85,85,0,0,0,76.8497,44.235 L 95.7174,60.6365 A 60,60,0,0,1,98.5736,57.5736 Z"></path></g></g>
-                    <g className="recharts-layer recharts-pie-sector" tabIndex="-1"><g className="recharts-layer recharts-shape"><path cx="141" cy="100" fill="color-mix(in oklab, var(--primary) 40%, var(--background))" stroke="#fff" name="2023-12-12" tabIndex="-1" data-recharts-item-index="16" data-recharts-item-id="recharts-pie-_r_2_" className="recharts-sector" d="M 72.2336,50.0383 A 85,85,0,0,0,68.9159,54.9569 L 90.1171,68.2048 A 60,60,0,0,1,92.459,64.7329 Z"></path></g></g>
-                    <g className="recharts-layer recharts-pie-sector" tabIndex="-1"><g className="recharts-layer recharts-shape"><path cx="141" cy="100" fill="color-mix(in oklab, var(--primary) 30%, var(--background))" stroke="#fff" name="2023-12-12" tabIndex="-1" data-recharts-item-index="17" data-recharts-item-id="recharts-pie-_r_2_" className="recharts-sector" d="M 65.2644,61.4108 A 85,85,0,0,0,62.7571,66.7879 L 85.7697,76.5561 A 60,60,0,0,1,87.5396,72.7606 Z"></path></g></g>
-                    <g className="recharts-layer recharts-pie-sector" tabIndex="-1"><g className="recharts-layer recharts-shape"><path cx="141" cy="100" fill="color-mix(in oklab, var(--primary) 30%, var(--background))" stroke="#fff" name="2023-12-12" tabIndex="-1" data-recharts-item-index="18" data-recharts-item-id="recharts-pie-_r_2_" className="recharts-sector" d="M 60.1602,73.7336 A 85,85,0,0,0,58.5249,79.4366 L 82.7823,85.4847 A 60,60,0,0,1,83.9366,81.459 Z"></path></g></g>
-                    <g className="recharts-layer recharts-pie-sector" tabIndex="-1"><g className="recharts-layer recharts-shape"><path cx="141" cy="100" fill="color-mix(in oklab, var(--primary) 20%, var(--background))" stroke="#fff" name="2023-12-12" tabIndex="-1" data-recharts-item-index="19" data-recharts-item-id="recharts-pie-_r_2_" className="recharts-sector" d="M 57.0465,86.7031 A 85,85,0,0,0,56.3235,92.5918 L 81.2283,94.7707 A 60,60,0,0,1,81.7387,90.6139 Z"></path></g></g>
-                    <g className="recharts-layer recharts-pie-sector" tabIndex="-1"><g className="recharts-layer recharts-shape"><path cx="141" cy="100" fill="color-mix(in oklab, var(--primary) 20%, var(--background))" stroke="#fff" name="2023-12-12" tabIndex="-1" data-recharts-item-index="20" data-recharts-item-id="recharts-pie-_r_2_" className="recharts-sector" d="M 56,100 A 85,85,0,0,0,56.2071,105.9293 L 81.1462,104.1854 A 60,60,0,0,1,81,100 Z"></path></g></g>
-                    <g className="recharts-layer recharts-pie-sector" tabIndex="-1"><g className="recharts-layer recharts-shape"><path cx="141" cy="100" fill="color-mix(in oklab, var(--primary) 10%, var(--background))" stroke="#fff" name="2023-12-12" tabIndex="-1" data-recharts-item-index="21" data-recharts-item-id="recharts-pie-_r_2_" className="recharts-sector" d="M 57.0465,113.2969 A 85,85,0,0,0,58.1785,119.1208 L 82.5378,113.4971 A 60,60,0,0,1,81.7387,109.3861 Z"></path></g></g>
-                    <g className="recharts-layer recharts-pie-sector" tabIndex="-1"><g className="recharts-layer recharts-shape"><path cx="141" cy="100" fill="color-mix(in oklab, var(--primary) 10%, var(--background))" stroke="#fff" name="2023-12-12" tabIndex="-1" data-recharts-item-index="22" data-recharts-item-id="recharts-pie-_r_2_" className="recharts-sector" d="M 60.1602,126.2664 A 85,85,0,0,0,62.1894,131.8416 L 85.369,122.4764 A 60,60,0,0,1,83.9366,118.541 Z"></path></g></g>
-                    <g className="recharts-layer recharts-pie-sector" tabIndex="-1"><g className="recharts-layer recharts-shape"><path cx="141" cy="100" fill="color-mix(in oklab, var(--primary) 5%, var(--background))" stroke="#fff" name="2023-12-12" tabIndex="-1" data-recharts-item-index="23" data-recharts-item-id="recharts-pie-_r_2_" className="recharts-sector" d="M 65.2644,138.5892 A 85,85,0,0,0,68.1408,143.7782 L 89.57,130.9023 A 60,60,0,0,1,87.5396,127.2394 Z"></path></g></g>
-                    <g className="recharts-layer recharts-pie-sector" tabIndex="-1"><g className="recharts-layer recharts-shape"><path cx="141" cy="100" fill="color-mix(in oklab, var(--primary) 5%, var(--background))" stroke="#fff" name="2023-12-12" tabIndex="-1" data-recharts-item-index="24" data-recharts-item-id="recharts-pie-_r_2_" className="recharts-sector" d="M 72.2336,149.9617 A 85,85,0,0,0,75.8862,154.6369 L 95.0373,138.5673 A 60,60,0,0,1,92.459,135.2671 Z"></path></g></g>
-                  </g>
-                  <text x="141" y="100" textAnchor="middle" dominantBaseline="middle">
-                    <tspan x="141" y="104" className="score-radial-value">{displayScore}%</tspan>
-                  </text>
-                </g>
-              </g>
-              <g tabIndex="-1" className="recharts-zIndex-layer_200"></g>
-              <g tabIndex="-1" className="recharts-zIndex-layer_300"></g>
-              <g tabIndex="-1" className="recharts-zIndex-layer_400"></g>
-              <g tabIndex="-1" className="recharts-zIndex-layer_500"></g>
-              <g tabIndex="-1" className="recharts-zIndex-layer_600"></g>
-              <g tabIndex="-1" className="recharts-zIndex-layer_1000"></g>
-              <g tabIndex="-1" className="recharts-zIndex-layer_1100"></g>
-              <g tabIndex="-1" className="recharts-zIndex-layer_1200"></g>
-              <g tabIndex="-1" className="recharts-zIndex-layer_2000"></g>
-            </svg>
+              <ScoreRadial value={displayScore} />
             </div>
             <div className="score-copy">
               <span className="score-why-label">{overlay ? "Hermes vote" : "Hermes vote · off"}</span>
