@@ -8,12 +8,6 @@ Hermes is a genuine research agent, not a chatbot wrapper. It runs a determinist
 
 The result is a transparent verdict: `BUY`, `WATCH`, `NO_BUY`, or `CONFIG_NEEDED`. Each verdict includes a confidence breakdown, reasoning graph, and full data-source provenance so the user can see exactly why the agent reached that conclusion. An optional model layer adds a concise natural-language final vote, but it is hard-guardrailed: it can never upgrade weak deterministic evidence into a buy.
 
-## Screenshots
-
-![Stockscalendar.xyz desktop trading desk](public/readme/stockscalendar-desktop.png)
-
-![Stockscalendar.xyz mobile trading desk](public/readme/stockscalendar-mobile.png)
-
 ## Why It Exists
 
 Tokenized equities are arriving on-chain faster than the tools to understand them. Robinhood Chain needs a discovery and confidence layer, or its stock tokens stay illiquid and intimidating.
